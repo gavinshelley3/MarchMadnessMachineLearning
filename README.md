@@ -1,6 +1,6 @@
 # March Madness Machine Learning
 
-A deep learning class project that builds an end-to-end pipeline for predicting NCAA Division I men's basketball tournament matchups using the Kaggle March Machine Learning Mania dataset. The initial goal is to aggregate season stats, create matchup features, train a feedforward neural net, and evaluate performance, with a path toward generating a 2026 bracket.
+A deep learning class project that predicts NCAA Division I men's basketball tournament matchups using the Kaggle March Machine Learning Mania dataset. The baseline pipeline aggregates regular-season stats, engineers matchup features, trains a feedforward neural net, and evaluates performance so that future bracket work has a solid foundation.
 
 ## Project Structure
 
@@ -28,6 +28,7 @@ A deep learning class project that builds an end-to-end pipeline for predicting 
 ¦   +-- utils.py
 +-- tests/
     +-- test_feature_engineering.py
+    +-- test_evaluation_metrics.py
 `
 
 ## Setup
@@ -37,64 +38,72 @@ A deep learning class project that builds an end-to-end pipeline for predicting 
    `ash
    pip install -r requirements.txt
    `
-3. **Obtain Kaggle data**: Download the March Machine Learning Mania dataset from Kaggle and copy these files into data/raw/:
+3. **Obtain Kaggle data**: Download the March Machine Learning Mania dataset and copy the core CSVs into data/raw/:
    - MTeams.csv
    - MRegularSeasonDetailedResults.csv
    - MNCAATourneyCompactResults.csv
    - MNCAATourneySeeds.csv
    - MMasseyOrdinals.csv
 
-VS Code is the primary local editor. You can also sync this repo to Google Colab later for GPU training since everything lives in the src/ package and uses relative paths.
-
 ## Usage
 
-### Inspect data
+### Inspect raw tables
 `ash
 python -m src.inspect_data --data-dir data/raw
 `
-Use --tables to inspect a subset (e.g., --tables teams tourney_seeds).
+Lists required files, row counts, season coverage, and seed parsing coverage.
 
 ### Dataset diagnostics
 `ash
 python -m src.dataset_diagnostics --data-dir data/raw
 `
-This builds the modeling dataset, saves it to data/processed/matchup_dataset.csv, and writes diagnostics to outputs/reports/dataset_diagnostics.json.
+Builds the modeling dataset, saves it to data/processed/matchup_dataset.csv, and writes a JSON diagnostic report to outputs/reports/dataset_diagnostics.json.
 
-### Train the baseline model
+### Train (with evaluation + reporting)
 `ash
 python -m src.train --data-dir data/raw --validation-start-season 2015
 `
-This command will:
-- build season-level team aggregates
-- create symmetric tournament matchup features
-- split by season (training before 2015, validation 2015+ by default)
-- standardize features, train the PyTorch model, run early stopping, and
-- save artifacts (model weights, scaler, feature lists) inside outputs/models/
-- emit validation predictions (outputs/reports/val_predictions.csv) and metrics (outputs/reports/val_metrics.json)
+This command:
+- Aggregates season-level team stats and matchup features.
+- Splits by season (train < 2015, validation = 2015 by default).
+- Trains the PyTorch model with early stopping and saves artifacts to outputs/models/.
+- Generates an evaluation suite under outputs/reports/:
+  - metrics.json – log loss, Brier score, ROC AUC, accuracy, and confusion matrix.
+  - al_predictions.csv – matchup IDs with probabilities and predicted classes.
+  - calibration_table.csv – 10-bin calibration analysis.
+  - seed_gap_metrics.json – accuracy/log loss by seed-difference bucket.
+  - upset_metrics.json – underdog accuracy/log loss.
+  - aseline_comparison.json – neural net vs. logistic regression vs. seed heuristic.
+  - acktest_summary.csv – rolling seasonal backtests for multiple cutoff years.
 
 ### Notebooks
 Open 
-otebooks/01_data_inspection.ipynb in VS Code or Colab to explore the raw data interactively.
+otebooks/01_data_inspection.ipynb in VS Code or Colab for exploratory analysis.
 
 ## Testing & CI
 
-Lightweight smoke tests live under 	ests/. Run them locally with:
+Run tests locally:
 `ash
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest
 `
-
-GitHub Actions (.github/workflows/ci.yml) runs these checks on each push and pull request. An accompanying workflow (.github/workflows/auto-merge.yml) can enable auto-merge for PRs once you apply the uto-merge label on GitHub and all checks succeed.
+GitHub Actions (.github/workflows/ci.yml) runs the same check on pushes and pull requests.
 
 ## Automation
 
-- Pushing to any non-default branch triggers the Auto PR workflow (.github/workflows/auto-pr.yml) which (when configured) opens/updates a PR targeting the default branch, applies the uto-merge label, and enables GitHub auto-merge.
-- Remove the uto-merge label (or disable auto-merge in the PR UI) if you want to pause the automatic merge.
-- Branch protection should enforce the CI / tests check so the PR merges itself after the workflow passes.
-- Add a epo-scoped personal access token as the AUTO_PR_TOKEN repository secret if you want the workflow to open/label PRs for you; without it, the workflow simply logs that auto PRs are skipped.
+- .github/workflows/auto-pr.yml (optional) can auto-open PRs and label them uto-merge when provided with an AUTO_PR_TOKEN secret.
+- Branch protection should require the CI / tests workflow before auto-merge completes.
+
+## Model Evaluation and Backtesting
+
+With diagnostics and reporting enabled, you can iterate confidently:
+1. python -m src.dataset_diagnostics --data-dir data/raw
+2. python -m src.train --data-dir data/raw --validation-start-season 2015
+
+Review the artifacts in outputs/reports/ to understand calibration, upset handling, seed-gap performance, baseline comparisons, and rolling backtests.
 
 ## Next Steps
 
-- Experiment with richer feature engineering (tempo, opponent-adjusted stats, recent-form windows)
-- Explore alternative models (gradient boosting, calibrated ensembles)
-- Integrate bracket generation logic once the matchup predictor is stable
-- Add Colab notebooks for GPU training runs
+- Expand feature engineering (tempo, opponent-adjusted stats, recency weighting).
+- Experiment with alternative models (gradient boosting, calibrated ensembles).
+- Layer in bracket simulation logic once matchup predictions are reliable.
+- Add GPU-enabled Colab notebooks for faster experimentation.
