@@ -16,11 +16,23 @@ jobs:
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
+      - name: Check for auto PR token
+        id: token
+        env:
+          AUTO_PR_TOKEN: ${{ secrets.AUTO_PR_TOKEN }}
+        run: |
+          if [ -z "$AUTO_PR_TOKEN" ]; then
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+            echo "AUTO_PR_TOKEN is not configured. Skipping auto PR creation."
+          else
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Create or update PR
         id: pr
+        if: steps.token.outputs.missing == 'false'
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.AUTO_PR_TOKEN }}
           script: |
             const branch = context.ref.replace('refs/heads/', '');
             const base = context.payload.repository.default_branch;
@@ -62,9 +74,9 @@ jobs:
             }
             core.setOutput('number', pr.number.toString());
       - name: Enable auto-merge
-        if: steps.pr.outputs.number != ''
+        if: steps.pr.outputs.number != '' && steps.token.outputs.missing == 'false'
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.AUTO_PR_TOKEN }}
           pull-request-number: ${{ steps.pr.outputs.number }}
           merge-method: squash
