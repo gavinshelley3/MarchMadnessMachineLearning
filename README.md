@@ -78,6 +78,13 @@ pytest
 
 GitHub Actions (.github/workflows/ci.yml) runs these checks on each push and pull request. An accompanying workflow (.github/workflows/auto-merge.yml) can enable auto-merge for PRs once you apply the uto-merge label on GitHub and all checks succeed.
 
+## Automation
+
+- Pushing to any non-default branch triggers the Auto PR workflow (`.github/workflows/auto-pr.yml`) which opens/updates a PR targeting the default branch, applies the `auto-merge` label, and enables GitHub auto-merge.
+- Remove the `auto-merge` label (or disable auto-merge in the PR UI) if you want to pause the automatic merge.
+- Branch protection now enforces the `CI / tests` check, so the PR will merge itself after that workflow passes.
+- Add a `repo`-scoped personal access token as the `AUTO_PR_TOKEN` repository secret if you want the workflow to open/label PRs for you; without it, the workflow simply logs that auto PRs are skipped.
+
 ## Next Steps
 
 - Experiment with richer feature engineering (tempo, opponent-adjusted stats, recent-form windows)
