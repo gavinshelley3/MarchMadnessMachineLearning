@@ -8,15 +8,38 @@ from typing import List, Tuple
 import numpy as np
 import pandas as pd
 import torch
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from .config import get_config
 from .data_pipeline import DatasetDiagnostics, load_and_build_dataset
-from .evaluate import evaluate_model, print_evaluation_summary
+from .evaluate import (
+    compute_calibration_table,
+    compute_seed_gap_metrics,
+    compute_upset_metrics,
+    compute_metrics,
+    evaluate_model,
+    print_evaluation_summary,
+)
 from .model import build_model
 from .utils import ensure_parent_dir, save_pickle, set_random_seed
+
+
+def _json_default(obj):
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
+
+
+def write_json(path: Path, payload) -> None:
+    ensure_parent_dir(path)
+    path.write_text(json.dumps(payload, indent=2, default=_json_default))
 
 
 def build_datasets(data_dir: Path | None = None):
@@ -58,6 +81,44 @@ def build_dataloader(X: np.ndarray, y: np.ndarray, batch_size: int, shuffle: boo
         torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
     )
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+
+
+def train_with_arrays(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    config,
+):
+    train_loader = build_dataloader(X_train, y_train, config.training.batch_size, True)
+    val_loader = build_dataloader(X_val, y_val, config.training.batch_size, False)
+    model = build_model(input_dim=X_train.shape[1])
+    return train_model(model, train_loader, val_loader, config)
+
+
+def run_seed_baseline(val_df: pd.DataFrame) -> np.ndarray:
+    seed1_median = val_df["Team1_SeedNum"].median()
+    seed2_median = val_df["Team2_SeedNum"].median()
+    if pd.isna(seed1_median):
+        seed1_median = 0
+    if pd.isna(seed2_median):
+        seed2_median = 0
+    seed1 = val_df["Team1_SeedNum"].fillna(seed1_median)
+    seed2 = val_df["Team2_SeedNum"].fillna(seed2_median)
+    seed_diff = seed1.to_numpy() - seed2.to_numpy()
+    logits = -0.25 * seed_diff
+    probs = 1 / (1 + np.exp(-logits))
+    return probs.astype(np.float32)
+
+
+def run_logistic_regression_baseline(
+    X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray
+) -> np.ndarray:
+    if len(np.unique(y_train)) < 2:
+        return np.full(len(X_val), float(np.unique(y_train)[0]))
+    model = LogisticRegression(max_iter=1000, solver="lbfgs")
+    model.fit(X_train, y_train)
+    return model.predict_proba(X_val)[:, 1]
 
 
 def train_model(
@@ -154,17 +215,96 @@ def save_reports(
     metrics_payload = {
         "train_rows": len(train_df),
         "val_rows": len(val_df),
-        "log_loss": metrics["log_loss"],
-        "accuracy": metrics["accuracy"],
+        "log_loss": metrics.get("log_loss"),
+        "brier_score": metrics.get("brier_score"),
+        "roc_auc": metrics.get("roc_auc"),
+        "accuracy": metrics.get("accuracy"),
+        "confusion_matrix": metrics.get("confusion_matrix"),
         "average_bce_loss": metrics.get("loss"),
     }
-    metrics_path = reports_dir / "val_metrics.json"
-    ensure_parent_dir(metrics_path)
-    metrics_path.write_text(json.dumps(metrics_payload, indent=2))
+    metrics_path = reports_dir / "metrics.json"
+    write_json(metrics_path, metrics_payload)
 
     features_json_path = reports_dir / "feature_columns.json"
-    ensure_parent_dir(features_json_path)
-    features_json_path.write_text(json.dumps(feature_cols, indent=2))
+    write_json(features_json_path, feature_cols)
+
+    calibration_table = compute_calibration_table(val_df["Label"].to_numpy(), predictions)
+    calibration_path = reports_dir / "calibration_table.csv"
+    calibration_table.to_csv(calibration_path, index=False)
+
+    seed_gap_metrics = compute_seed_gap_metrics(val_df, predictions)
+    write_json(reports_dir / "seed_gap_metrics.json", seed_gap_metrics)
+
+    upset_metrics = compute_upset_metrics(val_df, predictions)
+    write_json(reports_dir / "upset_metrics.json", upset_metrics)
+
+
+def _baseline_payload(metrics: dict, sample_count: int) -> dict:
+    return {
+        "log_loss": metrics.get("log_loss"),
+        "brier_score": metrics.get("brier_score"),
+        "roc_auc": metrics.get("roc_auc"),
+        "accuracy": metrics.get("accuracy"),
+        "sample_count": sample_count,
+    }
+
+
+def save_baseline_comparison(
+    metrics: dict,
+    y_true: np.ndarray,
+    predictions: np.ndarray,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    val_df: pd.DataFrame,
+    config,
+) -> None:
+    reports_dir = config.paths.outputs_dir / "reports"
+    logistic_probs = run_logistic_regression_baseline(X_train, y_train, X_val)
+    seed_probs = run_seed_baseline(val_df)
+    logistic_metrics, _ = compute_metrics(y_true, logistic_probs)
+    seed_metrics, _ = compute_metrics(y_true, seed_probs)
+
+    comparison = {
+        "neural_net": _baseline_payload(metrics, len(y_true)),
+        "logistic_regression": _baseline_payload(logistic_metrics, len(y_true)),
+        "seed_baseline": _baseline_payload(seed_metrics, len(y_true)),
+    }
+    comparison_path = reports_dir / "baseline_comparison.json"
+    write_json(comparison_path, comparison)
+
+
+def run_rolling_backtests(dataset: pd.DataFrame, config) -> None:
+    splits = [
+        (2014, 2015),
+        (2016, 2017),
+        (2018, 2019),
+        (2020, 2021),
+    ]
+    rows = []
+    for train_end, val_start in splits:
+        train_df = dataset[dataset["Season"] <= train_end].reset_index(drop=True)
+        val_df = dataset[dataset["Season"] >= val_start].reset_index(drop=True)
+        if train_df.empty or val_df.empty:
+            continue
+        set_random_seed(config.training.random_seed + train_end)
+        X_train, y_train, X_val, y_val, _, _ = prepare_features(train_df, val_df)
+        _, split_metrics, _, _ = train_with_arrays(X_train, y_train, X_val, y_val, config)
+        rows.append(
+            {
+                "split_year": f"train<= {train_end} | val>= {val_start}",
+                "train_seasons": f"{train_df['Season'].min()}-{train_df['Season'].max()}",
+                "validation_seasons": f"{val_df['Season'].min()}-{val_df['Season'].max()}",
+                "log_loss": split_metrics.get("log_loss"),
+                "brier_score": split_metrics.get("brier_score"),
+                "roc_auc": split_metrics.get("roc_auc"),
+                "accuracy": split_metrics.get("accuracy"),
+            }
+        )
+    if rows:
+        backtest_path = config.paths.outputs_dir / "reports" / "backtest_summary.csv"
+        ensure_parent_dir(backtest_path)
+        pd.DataFrame(rows).to_csv(backtest_path, index=False)
 
 
 def log_dataset_diagnostics(diag: DatasetDiagnostics) -> None:
@@ -226,13 +366,15 @@ def main() -> None:
     )
     print(f"Feature columns used: {len(feature_cols)}")
 
-    train_loader = build_dataloader(X_train, y_train, config.training.batch_size, True)
-    val_loader = build_dataloader(X_val, y_val, config.training.batch_size, False)
-
-    model = build_model(input_dim=X_train.shape[1])
-    trained_model, final_metrics, _, val_pred = train_model(model, train_loader, val_loader, config)
+    trained_model, final_metrics, y_true, val_pred = train_with_arrays(
+        X_train, y_train, X_val, y_val, config
+    )
     save_artifacts(trained_model, scaler, feature_cols, config)
     save_reports(train_df, val_df, val_pred, final_metrics, feature_cols, config)
+    save_baseline_comparison(
+        final_metrics, y_true, val_pred, X_train, y_train, X_val, val_df, config
+    )
+    run_rolling_backtests(dataset, config)
     print("Training complete. Artifacts saved to", config.paths.models_dir)
 
 
