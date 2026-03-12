@@ -1,0 +1,70 @@
+name: Auto PR
+
+on:
+  push:
+    branches-ignore:
+      - master
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  open-pr:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update PR
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const branch = context.ref.replace('refs/heads/', '');
+            const base = context.payload.repository.default_branch;
+            if (branch === base) {
+              core.setOutput('number', '');
+              return;
+            }
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const { data: prs } = await github.pulls.list({
+              owner,
+              repo,
+              head: `${owner}:${branch}`,
+              state: 'open',
+            });
+            let pr;
+            if (prs.length > 0) {
+              pr = prs[0];
+            } else {
+              pr = (
+                await github.pulls.create({
+                  owner,
+                  repo,
+                  head: branch,
+                  base,
+                  title: `Auto PR for ${branch}`,
+                  body: 'This PR was opened automatically by the Auto PR workflow.',
+                })
+              ).data;
+            }
+            const hasLabel = pr.labels.some((label) => label.name === 'auto-merge');
+            if (!hasLabel) {
+              await github.issues.addLabels({
+                owner,
+                repo,
+                issue_number: pr.number,
+                labels: ['auto-merge'],
+              });
+            }
+            core.setOutput('number', pr.number.toString());
+      - name: Enable auto-merge
+        if: steps.pr.outputs.number != ''
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.pr.outputs.number }}
+          merge-method: squash
