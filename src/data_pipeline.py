@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+import json
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
 from . import data_loading, dataset_builder
-from .feature_engineering import parse_numeric_seed
+from .feature_engineering import ADVANCED_FEATURE_COLUMNS, parse_numeric_seed
 
 
 @dataclass
@@ -26,6 +27,9 @@ class DatasetDiagnostics:
     massey_coverage: float
     class_balance: Dict[str, float]
     feature_count: int
+    advanced_feature_count: int
+    advanced_feature_names: List[str] = field(default_factory=list)
+    feature_summary_stats: Dict[str, Dict[str, float]] = field(default_factory=dict)
     massey_system: Optional[str] = None
 
     def to_dict(self) -> Dict[str, object]:
@@ -64,12 +68,24 @@ def build_dataset_from_frames(
         col: int(count) for col, count in dataset[diff_cols].isna().sum().items()
     }
     feature_count = len(diff_cols)
+    advanced_diff_cols = [
+        col for col in diff_cols if col.replace("Diff_", "") in ADVANCED_FEATURE_COLUMNS
+    ]
     missing_feature_rows = dataset_raw[diff_cols].isna().any(axis=1).sum()
     team_feature_join_coverage = (
         1.0 - (missing_feature_rows / rows_before)
         if rows_before
         else 0.0
     )
+    feature_summary_stats = {
+        col: {
+            "mean": float(dataset[col].mean()),
+            "std": float(dataset[col].std(ddof=0)),
+            "min": float(dataset[col].min()),
+            "max": float(dataset[col].max()),
+        }
+        for col in diff_cols
+    }
 
     seed_parse_coverage = float(
         seeds.copy().assign(SeedNum=lambda df: df["Seed"].apply(parse_numeric_seed))["SeedNum"].notna().mean()
@@ -104,6 +120,9 @@ def build_dataset_from_frames(
         massey_coverage=massey_coverage,
         class_balance=class_balance,
         feature_count=feature_count,
+        advanced_feature_count=len(advanced_diff_cols),
+        advanced_feature_names=advanced_diff_cols,
+        feature_summary_stats=feature_summary_stats,
         massey_system=massey_system,
     )
     return dataset, diagnostics
@@ -127,3 +146,15 @@ def load_and_build_dataset(
         massey_ordinals=massey,
         massey_system=massey_system,
     )
+
+
+def save_feature_summary_report(diagnostics: DatasetDiagnostics, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "feature_count": diagnostics.feature_count,
+        "advanced_feature_count": diagnostics.advanced_feature_count,
+        "advanced_feature_columns": diagnostics.advanced_feature_names,
+        "feature_null_counts": diagnostics.feature_null_counts,
+        "feature_summary_stats": diagnostics.feature_summary_stats,
+    }
+    output_path.write_text(json.dumps(payload, indent=2))

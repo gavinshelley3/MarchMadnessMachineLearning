@@ -14,7 +14,11 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from .config import get_config
-from .data_pipeline import DatasetDiagnostics, load_and_build_dataset
+from .data_pipeline import (
+    DatasetDiagnostics,
+    load_and_build_dataset,
+    save_feature_summary_report,
+)
 from .evaluate import (
     compute_calibration_table,
     compute_seed_gap_metrics,
@@ -320,6 +324,7 @@ def log_dataset_diagnostics(diag: DatasetDiagnostics) -> None:
     print(f"Seed numeric coverage (modeling set): {diag.seed_numeric_coverage:.2%}")
     print(f"Massey coverage (modeling set): {diag.massey_coverage:.2%}")
     print(f"Feature columns: {diag.feature_count}")
+    print(f"Advanced feature columns present: {diag.advanced_feature_count}")
     print("Label distribution:", diag.class_balance)
 
 
@@ -352,6 +357,8 @@ def main() -> None:
     processed_path = config.paths.processed_data_dir / "matchup_dataset.csv"
     ensure_parent_dir(processed_path)
     dataset.to_csv(processed_path, index=False)
+    feature_summary_path = config.paths.outputs_dir / "reports" / "feature_summary.json"
+    save_feature_summary_report(diagnostics, feature_summary_path)
 
     train_df, val_df = time_based_split(dataset, config.training.validation_start_season)
     X_train, y_train, X_val, y_val, feature_cols, scaler = prepare_features(
