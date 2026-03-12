@@ -30,7 +30,7 @@ jobs:
             }
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const { data: prs } = await github.pulls.list({
+            const { data: prs } = await github.rest.pulls.list({
               owner,
               repo,
               head: `${owner}:${branch}`,
@@ -41,7 +41,7 @@ jobs:
               pr = prs[0];
             } else {
               pr = (
-                await github.pulls.create({
+                await github.rest.pulls.create({
                   owner,
                   repo,
                   head: branch,
@@ -51,9 +51,9 @@ jobs:
                 })
               ).data;
             }
-            const hasLabel = pr.labels.some((label) => label.name === 'auto-merge');
+            const hasLabel = pr.labels?.some((label) => label.name === 'auto-merge');
             if (!hasLabel) {
-              await github.issues.addLabels({
+              await github.rest.issues.addLabels({
                 owner,
                 repo,
                 issue_number: pr.number,
