@@ -7,6 +7,8 @@ from typing import Iterable
 import pandas as pd
 
 from . import data_loading
+from .config import get_config
+from .feature_engineering import parse_numeric_seed
 
 
 def summarize_dataframe(name: str, df: pd.DataFrame) -> None:
@@ -28,9 +30,14 @@ def summarize_dataframe(name: str, df: pd.DataFrame) -> None:
             print(
                 f"Season coverage: {int(seasons.min())} - {int(seasons.max())}"
             )
+    if name == "tourney_seeds" and "Seed" in df.columns:
+        parsed = df["Seed"].apply(parse_numeric_seed)
+        coverage = parsed.notna().mean()
+        print(f"Seed parsing coverage: {coverage:.2%}")
 
 
 def run_inspection(data_dir: Path | None = None, tables: Iterable[str] | None = None) -> None:
+    report_expected_files(data_dir)
     loaders = {
         "teams": data_loading.load_teams,
         "regular_season_detailed": data_loading.load_regular_season_detailed_results,
@@ -45,6 +52,23 @@ def run_inspection(data_dir: Path | None = None, tables: Iterable[str] | None = 
             raise ValueError(f"Unknown table '{table_name}'. Choices: {list(loaders)}")
         df = loaders[table_name](data_dir)
         summarize_dataframe(table_name, df)
+
+
+def report_expected_files(data_dir: Path | None) -> None:
+    config = get_config()
+    base_dir = Path(data_dir) if data_dir else config.paths.raw_data_dir
+    print("=== Required file check ===")
+    missing = []
+    for key, filename in data_loading.CORE_FILES.items():
+        exists = (base_dir / filename).exists()
+        status = "FOUND" if exists else "MISSING"
+        print(f"{filename}: {status}")
+        if not exists:
+            missing.append(filename)
+    if missing:
+        print("Missing files will prevent the pipeline from running:", missing)
+    else:
+        print("All core Kaggle files are present.")
 
 
 def build_parser() -> argparse.ArgumentParser:

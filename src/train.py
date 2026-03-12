@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import List, Tuple
 
@@ -12,20 +13,15 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from .config import get_config
-from . import data_loading
-from .dataset_builder import build_matchup_dataset
+from .data_pipeline import DatasetDiagnostics, load_and_build_dataset
 from .evaluate import evaluate_model, print_evaluation_summary
 from .model import build_model
 from .utils import ensure_parent_dir, save_pickle, set_random_seed
 
 
-def build_datasets(data_dir: Path | None = None) -> pd.DataFrame:
-    regular = data_loading.load_regular_season_detailed_results(data_dir)
-    tourney = data_loading.load_tourney_compact_results(data_dir)
-    seeds = data_loading.load_tourney_seeds(data_dir)
-    massey = data_loading.load_massey_ordinals(data_dir)
-    dataset = build_matchup_dataset(regular, tourney, seeds, massey)
-    return dataset
+def build_datasets(data_dir: Path | None = None):
+    dataset, diagnostics = load_and_build_dataset(data_dir)
+    return dataset, diagnostics
 
 
 def time_based_split(
@@ -40,7 +36,7 @@ def time_based_split(
     if val_df.empty:
         latest_season = dataset["Season"].max()
         val_df = dataset[dataset["Season"] == latest_season]
-    return train_df, val_df
+    return train_df.reset_index(drop=True), val_df.reset_index(drop=True)
 
 
 def prepare_features(
@@ -69,7 +65,7 @@ def train_model(
     train_loader: DataLoader,
     val_loader: DataLoader,
     config,
-) -> Tuple[nn.Module, dict]:
+) -> Tuple[nn.Module, dict, np.ndarray, np.ndarray]:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     criterion = nn.BCEWithLogitsLoss()
@@ -113,9 +109,11 @@ def train_model(
 
     if best_state:
         model.load_state_dict(best_state)
-    final_metrics = evaluate_model(model, val_loader, device, criterion)
+    final_metrics, y_true, y_pred = evaluate_model(
+        model, val_loader, device, criterion, return_predictions=True
+    )
     print_evaluation_summary(final_metrics)
-    return model, final_metrics
+    return model, final_metrics, y_true, y_pred
 
 
 def save_artifacts(model, scaler, feature_cols, config) -> None:
@@ -128,6 +126,61 @@ def save_artifacts(model, scaler, feature_cols, config) -> None:
 
     features_path = config.paths.models_dir / "feature_columns.pkl"
     save_pickle(feature_cols, features_path)
+
+
+def save_reports(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    predictions: np.ndarray,
+    metrics: dict,
+    feature_cols: List[str],
+    config,
+) -> None:
+    reports_dir = config.paths.outputs_dir / "reports"
+    predictions_path = reports_dir / "val_predictions.csv"
+    ensure_parent_dir(predictions_path)
+
+    val_metadata_cols = ["MatchupID", "Season", "Team1ID", "Team2ID", "Label"]
+    missing_cols = [col for col in val_metadata_cols if col not in val_df.columns]
+    if missing_cols:
+        raise ValueError(f"Validation DataFrame missing columns: {missing_cols}")
+    if len(predictions) != len(val_df):
+        raise ValueError("Prediction count does not match validation rows.")
+    preds_df = val_df[val_metadata_cols].copy()
+    preds_df["PredProb"] = predictions
+    preds_df["PredClass"] = (predictions >= 0.5).astype(int)
+    preds_df.to_csv(predictions_path, index=False)
+
+    metrics_payload = {
+        "train_rows": len(train_df),
+        "val_rows": len(val_df),
+        "log_loss": metrics["log_loss"],
+        "accuracy": metrics["accuracy"],
+        "average_bce_loss": metrics.get("loss"),
+    }
+    metrics_path = reports_dir / "val_metrics.json"
+    ensure_parent_dir(metrics_path)
+    metrics_path.write_text(json.dumps(metrics_payload, indent=2))
+
+    features_json_path = reports_dir / "feature_columns.json"
+    ensure_parent_dir(features_json_path)
+    features_json_path.write_text(json.dumps(feature_cols, indent=2))
+
+
+def log_dataset_diagnostics(diag: DatasetDiagnostics) -> None:
+    print("=== Dataset build diagnostics ===")
+    print(
+        f"Tournament games: {diag.total_tourney_games} -> symmetric rows after filtering: {diag.rows_after_filter}"
+    )
+    print(f"Dropped rows: {diag.dropped_rows}")
+    if diag.dropped_seasons:
+        print(f"Seasons removed due to missing features: {diag.dropped_seasons}")
+    print(f"Team feature join coverage: {diag.team_feature_join_coverage:.2%}")
+    print(f"Seed parse coverage: {diag.seed_parse_coverage:.2%}")
+    print(f"Seed numeric coverage (modeling set): {diag.seed_numeric_coverage:.2%}")
+    print(f"Massey coverage (modeling set): {diag.massey_coverage:.2%}")
+    print(f"Feature columns: {diag.feature_count}")
+    print("Label distribution:", diag.class_balance)
 
 
 def parse_args() -> argparse.Namespace:
@@ -154,7 +207,8 @@ def main() -> None:
         config.training.validation_start_season = args.validation_start_season
     set_random_seed(config.training.random_seed)
 
-    dataset = build_datasets(args.data_dir)
+    dataset, diagnostics = build_datasets(args.data_dir)
+    log_dataset_diagnostics(diagnostics)
     processed_path = config.paths.processed_data_dir / "matchup_dataset.csv"
     ensure_parent_dir(processed_path)
     dataset.to_csv(processed_path, index=False)
@@ -164,12 +218,21 @@ def main() -> None:
         train_df, val_df
     )
 
+    print(
+        f"Training seasons: {train_df['Season'].min()} - {train_df['Season'].max()} ({len(train_df)} rows)"
+    )
+    print(
+        f"Validation seasons: {val_df['Season'].min()} - {val_df['Season'].max()} ({len(val_df)} rows)"
+    )
+    print(f"Feature columns used: {len(feature_cols)}")
+
     train_loader = build_dataloader(X_train, y_train, config.training.batch_size, True)
     val_loader = build_dataloader(X_val, y_val, config.training.batch_size, False)
 
     model = build_model(input_dim=X_train.shape[1])
-    trained_model, _ = train_model(model, train_loader, val_loader, config)
+    trained_model, final_metrics, _, val_pred = train_model(model, train_loader, val_loader, config)
     save_artifacts(trained_model, scaler, feature_cols, config)
+    save_reports(train_df, val_df, val_pred, final_metrics, feature_cols, config)
     print("Training complete. Artifacts saved to", config.paths.models_dir)
 
 
