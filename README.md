@@ -6,22 +6,22 @@ A deep learning class project that builds an end-to-end pipeline for predicting 
 
 `
 +-- data/
-¦   +-- raw/                  # Place Kaggle CSVs here (ignored by git)
-¦   +-- processed/
+Â¦   +-- raw/                  # Place Kaggle CSVs here (ignored by git)
+Â¦   +-- processed/
 +-- notebooks/
-¦   +-- 01_data_inspection.ipynb
+Â¦   +-- 01_data_inspection.ipynb
 +-- outputs/
-¦   +-- models/               # Saved weights, scalers
+Â¦   +-- models/               # Saved weights, scalers
 +-- src/
-¦   +-- config.py             # Paths + hyperparameters
-¦   +-- data_loading.py       # CSV loaders
-¦   +-- inspect_data.py       # CLI data summary
-¦   +-- feature_engineering.py
-¦   +-- dataset_builder.py
-¦   +-- model.py              # PyTorch tabular NN
-¦   +-- train.py              # Training entrypoint
-¦   +-- evaluate.py           # Metrics helpers
-¦   +-- utils.py
+Â¦   +-- config.py             # Paths + hyperparameters
+Â¦   +-- data_loading.py       # CSV loaders
+Â¦   +-- inspect_data.py       # CLI data summary
+Â¦   +-- feature_engineering.py
+Â¦   +-- dataset_builder.py
+Â¦   +-- model.py              # PyTorch tabular NN
+Â¦   +-- train.py              # Training entrypoint
+Â¦   +-- evaluate.py           # Metrics helpers
+Â¦   +-- utils.py
 +-- tests/
     +-- test_feature_engineering.py
 `
