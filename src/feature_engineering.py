@@ -5,32 +5,7 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 
-ADVANCED_FEATURE_COLUMNS: List[str] = [
-    "EffectiveFGPercent",
-    "TrueShootingPercent",
-    "ThreePointRate",
-    "FreeThrowRate",
-    "OffensiveRating",
-    "DefensiveRating",
-    "NetRating",
-    "ReboundMargin",
-    "OffensiveReboundRate",
-    "TurnoverMargin",
-    "AssistRate",
-    "AdjustedScoringMargin",
-    "Recent5WinPct",
-    "Recent5ScoringMargin",
-    "Recent5OffRating",
-    "Recent5DefRating",
-    "Recent5EffectiveFG",
-    "Recent10WinPct",
-    "Recent10ScoringMargin",
-    "Recent10OffRating",
-    "Recent10DefRating",
-    "Recent10EffectiveFG",
-    "NeutralWinPercentage",
-    "NeutralScoringMargin",
-]
+from .feature_metadata import ADVANCED_FEATURE_COLUMNS
 
 
 def parse_numeric_seed(seed_str: str | float | None) -> int | None:

@@ -67,9 +67,18 @@ def time_based_split(
 
 
 def prepare_features(
-    train_df: pd.DataFrame, val_df: pd.DataFrame
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    selected_feature_cols: List[str] | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[str], StandardScaler]:
-    feature_cols = [col for col in train_df.columns if col.startswith("Diff_")]
+    available = [col for col in train_df.columns if col.startswith("Diff_")]
+    if selected_feature_cols:
+        missing = sorted(set(selected_feature_cols) - set(available))
+        if missing:
+            raise ValueError(f"Selected feature columns missing from dataset: {missing}")
+        feature_cols = selected_feature_cols
+    else:
+        feature_cols = available
     if not feature_cols:
         raise ValueError("No feature columns found. Ensure feature engineering ran correctly.")
     scaler = StandardScaler()

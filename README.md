@@ -7,23 +7,24 @@ A deep learning class project built around the Kaggle March Machine Learning Man
 ```
 .
 +-- data/
-¦   +-- raw/        # Place Kaggle CSVs here (ignored by git)
-¦   +-- processed/
+|   +-- raw/        # Place Kaggle CSVs here (ignored by git)
+|   +-- processed/
 +-- notebooks/
-¦   +-- 01_data_inspection.ipynb
+|   +-- 01_data_inspection.ipynb
 +-- outputs/
-¦   +-- models/     # Saved models, scalers
-¦   +-- reports/    # Metrics, predictions, diagnostics
+|   +-- models/     # Saved models, scalers
+|   +-- reports/    # Metrics, predictions, diagnostics
 +-- src/
-¦   +-- config.py
-¦   +-- data_loading.py
-¦   +-- feature_engineering.py
-¦   +-- dataset_builder.py
-¦   +-- data_pipeline.py
-¦   +-- dataset_diagnostics.py
-¦   +-- train.py
-¦   +-- evaluate.py
-¦   +-- utils.py
+|   +-- config.py
+|   +-- data_loading.py
+|   +-- feature_engineering.py
+|   +-- dataset_builder.py
+|   +-- data_pipeline.py
+|   +-- dataset_diagnostics.py
+|   +-- experiments.py
+|   +-- train.py
+|   +-- evaluate.py
+|   +-- utils.py
 +-- tests/
     +-- test_feature_engineering.py
     +-- test_evaluation_metrics.py
@@ -67,12 +68,12 @@ This command:
 - Splits by season (train < 2015, validation = 2015 by default).
 - Trains the PyTorch model with early stopping and saves artifacts in `outputs/models/`.
 - Generates a research-grade report suite in `outputs/reports/`:
-  - `metrics.json` – log loss, Brier score, ROC AUC, accuracy, and confusion matrix.
-  - `val_predictions.csv` – matchup IDs with predicted probabilities and classes.
-  - `calibration_table.csv` – 10-bin calibration diagnostics.
-  - `seed_gap_metrics.json` & `upset_metrics.json` – performance on favorites vs. underdogs.
-  - `baseline_comparison.json` – neural net vs. logistic regression vs. seed heuristic.
-  - `backtest_summary.csv` – rolling seasonal backtests for multiple cutoffs.
+  - `metrics.json` â€“ log loss, Brier score, ROC AUC, accuracy, and confusion matrix.
+  - `val_predictions.csv` â€“ matchup IDs with predicted probabilities and classes.
+  - `calibration_table.csv` â€“ 10-bin calibration diagnostics.
+  - `seed_gap_metrics.json` & `upset_metrics.json` â€“ performance on favorites vs. underdogs.
+  - `baseline_comparison.json` â€“ neural net vs. logistic regression vs. seed heuristic.
+  - `backtest_summary.csv` â€“ rolling seasonal backtests for multiple cutoffs.
 
 ### Notebooks
 Open `notebooks/01_data_inspection.ipynb` in VS Code or Colab for exploratory data work.
@@ -96,6 +97,21 @@ For a full diagnostics loop:
 2. `python -m src.train --data-dir data/raw --validation-start-season 2015`
 
 Review `outputs/reports/` for calibration, upset handling, seed-gap performance, baseline comparisons, and rolling backtests.
+
+## Model Comparison Experiments
+
+Use the experiment runner to compare feature sets and model families:
+
+```bash
+python -m src.experiments --data-dir data/raw --validation-start-season 2015
+```
+
+This command rebuilds the dataset, evaluates the seed baseline, logistic regression, and the neural net across the core-only and advanced feature sets, and replays the rolling backtests. It writes the following artifacts to `outputs/reports/`:
+
+- `model_comparison.csv` â€“ per-split metrics (log loss, Brier score, ROC AUC, accuracy) for every feature-set/model pair.
+- `model_comparison_summary.json` â€“ key conclusions (best validation config, backtest improvements, neural vs. logistic wins).
+- `feature_set_summary.json` â€“ descriptions and column counts per feature set.
+- `experiment_config.json` â€“ reproducibility details (feature sets, models, splits, validation season).
 
 ## Testing & CI
 

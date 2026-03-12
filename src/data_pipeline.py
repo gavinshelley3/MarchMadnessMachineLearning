@@ -8,7 +8,8 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from . import data_loading, dataset_builder
-from .feature_engineering import ADVANCED_FEATURE_COLUMNS, parse_numeric_seed
+from .feature_engineering import parse_numeric_seed
+from .feature_metadata import ADVANCED_FEATURE_COLUMNS
 
 
 @dataclass
