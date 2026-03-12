@@ -201,6 +201,12 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Editor-specific settings
+.vscode/
+
+# Large archives (e.g., Kaggle downloads)
+*.zip
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
