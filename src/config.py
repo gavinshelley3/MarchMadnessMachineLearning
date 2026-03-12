@@ -20,11 +20,11 @@ class PathsConfig:
     models_dir: Path = Path(os.getenv("MODELS_DIR", ""))
 
     def __post_init__(self) -> None:
-        if not self.raw_data_dir:
+        if not self.raw_data_dir or str(self.raw_data_dir) == ".":
             self.raw_data_dir = self.data_dir / "raw"
-        if not self.processed_data_dir:
+        if not self.processed_data_dir or str(self.processed_data_dir) == ".":
             self.processed_data_dir = self.data_dir / "processed"
-        if not self.models_dir:
+        if not self.models_dir or str(self.models_dir) == ".":
             self.models_dir = self.outputs_dir / "models"
 
     def ensure_exists(self) -> None:
