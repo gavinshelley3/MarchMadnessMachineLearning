@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .config import get_config
-from .data_pipeline import load_and_build_dataset
+from .data_pipeline import load_and_build_dataset, save_feature_summary_report
 from .utils import ensure_parent_dir
 
 
@@ -51,9 +51,12 @@ def main() -> None:
     diagnostics_path = reports_dir / "dataset_diagnostics.json"
     ensure_parent_dir(diagnostics_path)
     diagnostics_path.write_text(json.dumps(diagnostics.to_dict(), indent=2))
+    feature_summary_path = reports_dir / "feature_summary.json"
+    save_feature_summary_report(diagnostics, feature_summary_path)
 
     print("Dataset saved to", save_path)
     print("Diagnostics saved to", diagnostics_path)
+    print("Feature summary saved to", feature_summary_path)
     print("\n=== Dataset Diagnostics ===")
     print(f"Total tournament games: {diagnostics.total_tourney_games}")
     print(
@@ -69,6 +72,7 @@ def main() -> None:
         print(f"Massey system: {diagnostics.massey_system}")
     print(f"Massey coverage in modeling set: {format_percentage(diagnostics.massey_coverage)}")
     print(f"Feature columns: {diagnostics.feature_count}")
+    print(f"Advanced feature columns present: {diagnostics.advanced_feature_count}")
     print("Class balance:")
     for label, pct in diagnostics.class_balance.items():
         print(f"  label {label}: {format_percentage(pct)}")
