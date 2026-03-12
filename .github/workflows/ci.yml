@@ -12,6 +12,8 @@ permissions:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -70,13 +70,15 @@ otebooks/01_data_inspection.ipynb in VS Code or Colab to explore the raw data in
 
 ## Testing & CI
 
-Lightweight smoke tests live under 	ests/. Run them locally with:
+Lightweight smoke tests live under `tests/`. Run them locally with:
 
-`ash
-pytest
-`
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest
+```
 
-GitHub Actions (.github/workflows/ci.yml) runs these checks on each push and pull request. An accompanying workflow (.github/workflows/auto-merge.yml) can enable auto-merge for PRs once you apply the uto-merge label on GitHub and all checks succeed.
+The `PYTEST_DISABLE_PLUGIN_AUTOLOAD` flag ensures only built-in pytest plugins run so we stay independent from environment-specific tooling such as `byu-pytest-utils`.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs these checks on each push and pull request. An accompanying workflow (`.github/workflows/auto-merge.yml`) can enable auto-merge for PRs once you apply the `auto-merge` label on GitHub and all checks succeed.
 
 ## Next Steps
 
