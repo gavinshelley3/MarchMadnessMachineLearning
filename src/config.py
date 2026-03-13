@@ -19,6 +19,8 @@ class PathsConfig:
     outputs_dir: Path = Path(os.getenv("OUTPUTS_DIR", BASE_DIR / "outputs"))
     models_dir: Path = Path(os.getenv("MODELS_DIR", ""))
     supplemental_ncaa_dir: Path = Path(os.getenv("SUPPLEMENTAL_NCAA_DIR", ""))
+    current_season_dir: Path = Path(os.getenv("CURRENT_SEASON_DIR", ""))
+    cbbpy_cache_dir: Path = Path(os.getenv("CBBPY_CACHE_DIR", ""))
 
     def __post_init__(self) -> None:
         if not self.raw_data_dir or str(self.raw_data_dir) == ".":
@@ -29,6 +31,10 @@ class PathsConfig:
             self.models_dir = self.outputs_dir / "models"
         if not self.supplemental_ncaa_dir or str(self.supplemental_ncaa_dir) == ".":
             self.supplemental_ncaa_dir = self.raw_data_dir / "ncaa_basketball"
+        if not self.current_season_dir or str(self.current_season_dir) == ".":
+            self.current_season_dir = self.data_dir / "current_season"
+        if not self.cbbpy_cache_dir or str(self.cbbpy_cache_dir) == ".":
+            self.cbbpy_cache_dir = self.current_season_dir / "cbbpy"
 
     def ensure_exists(self) -> None:
         for path in [
@@ -38,6 +44,8 @@ class PathsConfig:
             self.outputs_dir,
             self.models_dir,
             self.supplemental_ncaa_dir,
+            self.current_season_dir,
+            self.cbbpy_cache_dir,
         ]:
             Path(path).mkdir(parents=True, exist_ok=True)
 

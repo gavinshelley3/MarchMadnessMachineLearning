@@ -47,6 +47,23 @@ def main() -> None:
         default=None,
         help="Override path for the supplemental NCAA Basketball dataset.",
     )
+    parser.add_argument(
+        "--include-cbbpy-current",
+        action="store_true",
+        help="Include current-season CBBpy enrichment features if cached.",
+    )
+    parser.add_argument(
+        "--cbbpy-season",
+        type=int,
+        default=None,
+        help="Season (e.g., 2026) to load from the cached CBBpy features.",
+    )
+    parser.add_argument(
+        "--cbbpy-features",
+        type=Path,
+        default=None,
+        help="Optional explicit path to a cached CBBpy team-features CSV.",
+    )
     args = parser.parse_args()
 
     config = get_config()
@@ -58,6 +75,9 @@ def main() -> None:
         include_supplemental_kaggle=args.include_supplemental_kaggle,
         supplemental_dir=supplemental_dir,
         reports_dir=config.paths.outputs_dir / "reports",
+        include_cbbpy_current=args.include_cbbpy_current,
+        cbbpy_features_path=args.cbbpy_features,
+        cbbpy_season=args.cbbpy_season,
     )
 
     save_path = args.save_dataset or (config.paths.processed_data_dir / "matchup_dataset.csv")
@@ -98,6 +118,16 @@ def main() -> None:
     print(f"Massey coverage in modeling set: {format_percentage(diagnostics.massey_coverage)}")
     print(f"Feature columns: {diagnostics.feature_count}")
     print(f"Advanced feature columns present: {diagnostics.advanced_feature_count}")
+    if diagnostics.supplemental_feature_count:
+        print(
+            f"Supplemental feature columns present: {diagnostics.supplemental_feature_count} "
+            f"(join coverage {format_percentage(diagnostics.supplemental_join_coverage)})"
+        )
+    if diagnostics.cbbpy_feature_count:
+        print(
+            f"CBBpy current-season feature columns present: {diagnostics.cbbpy_feature_count} "
+            f"(join coverage {format_percentage(diagnostics.cbbpy_join_coverage)})"
+        )
     print("Class balance:")
     for label, pct in diagnostics.class_balance.items():
         print(f"  label {label}: {format_percentage(pct)}")

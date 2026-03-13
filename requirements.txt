@@ -5,3 +5,4 @@ torch>=2.2
 matplotlib>=3.8
 jupyter>=1.0
 pytest>=8.0
+cbbpy>=2.1.2

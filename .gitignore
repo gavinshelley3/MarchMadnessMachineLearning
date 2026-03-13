@@ -218,5 +218,7 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+data/current_season/*
+!data/current_season/.gitkeep
 outputs/*
 !outputs/.gitkeep
