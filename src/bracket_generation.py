@@ -177,18 +177,24 @@ class PredictionLookup:
 class BracketGenerator:
     """Deterministically generates a bracket using saved predictions."""
 
-    def __init__(self, predictions_path: Path, output_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        predictions_path: Path,
+        output_dir: Optional[Path] = None,
+        ensure_dirs: bool = True,
+    ):
         self.predictions_path = predictions_path
         config = get_config()
         default_dir = config.paths.outputs_dir / "brackets"
         self.output_dir = output_dir or default_dir
-        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        if ensure_dirs:
+            Path(self.output_dir).mkdir(parents=True, exist_ok=True)
 
-    def generate(
+    def compute_round_results(
         self,
         bracket_def: BracketDefinition,
         season: Optional[int] = None,
-    ) -> Dict[str, Path]:
+    ) -> Tuple[Dict[str, List[GameResult]], TeamState, PredictionLookup, List[Dict[str, object]]]:
         season_to_use = season or bracket_def.season
         lookup = PredictionLookup(self.predictions_path, season_to_use)
         round_results: Dict[str, List[GameResult]] = {name: [] for name, _ in ROUND_SEQUENCE}
@@ -227,14 +233,21 @@ class BracketGenerator:
             lookup=lookup,
         )
         round_results["Championship"].append(championship)
+        return round_results, championship.winner, lookup, unresolved_slots
 
+    def generate(
+        self,
+        bracket_def: BracketDefinition,
+        season: Optional[int] = None,
+    ) -> Dict[str, Path]:
+        round_results, champion, lookup, unresolved_slots = self.compute_round_results(bracket_def, season)
         writer = _BracketWriter(
             output_dir=self.output_dir,
             bracket_definition=bracket_def,
             lookup=lookup,
             unresolved_slots=unresolved_slots,
         )
-        return writer.write(round_results, champion=championship.winner)
+        return writer.write(round_results, champion=champion)
 
     def _run_region(
         self,
@@ -427,6 +440,15 @@ class _BracketWriter:
                     f"- {slot['region']} {slot['slot']} seed {slot['seed']} currently set to {slot['team_key']} (options: {options})"
                 )
         return "\n".join(lines)
+
+
+def get_deterministic_round_results(
+    bracket_def: BracketDefinition,
+    predictions_path: Path,
+    season: Optional[int] = None,
+) -> Tuple[Dict[str, List[GameResult]], TeamState, PredictionLookup, List[Dict[str, object]]]:
+    generator = BracketGenerator(predictions_path, ensure_dirs=False)
+    return generator.compute_round_results(bracket_def, season)
 
 
 def _collect_upsets(rows: List[Dict[str, object]]) -> List[Dict[str, object]]:
