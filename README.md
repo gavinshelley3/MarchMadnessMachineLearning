@@ -180,6 +180,8 @@ python -m src.render_bracket_view \
 
 Both flags are optional; by default the script will use the latest `_bracket_results.json` in `outputs/brackets/` and will write to `outputs/final_report/bracket_view.html`. Open the resulting HTML file locally to review the entire bracket without rerunning the pipeline.
 
+The renderer arranges East/West and South/Midwest regions in true bracket form, flows rounds inward toward the Final Four, highlights winners, and calls out the champion prominently for presentation-ready screenshots.
+
 ## Testing & CI
 
 Run the test suite locally with:
