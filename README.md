@@ -44,6 +44,8 @@ A deep learning class project built around the Kaggle March Machine Learning Man
    - `MNCAATourneyCompactResults.csv`
    - `MNCAATourneySeeds.csv`
    - `MMasseyOrdinals.csv`
+   > Tip: you can leave the official Kaggle export inside `data/raw/march_machine_learning_mania_2026/` without shuffling files.  
+   > The loader now searches that nested folder (and prefers the largest menâ€™s CSV when duplicates exist) whenever you point commands at `data/raw/`, so the pipeline automatically ignores lightweight samples and the parallel womenâ€™s tables.
 
 ## Usage
 
@@ -181,6 +183,34 @@ python -m src.render_bracket_view \
 Both flags are optional; by default the script will use the latest `_bracket_results.json` in `outputs/brackets/` and will write to `outputs/final_report/bracket_view.html`. Open the resulting HTML file locally to review the entire bracket without rerunning the pipeline.
 
 The renderer arranges East/West and South/Midwest regions in true bracket form, flows rounds inward toward the Final Four, highlights winners, and calls out the champion prominently for presentation-ready screenshots.
+
+## Supplemental Kaggle NCAA Basketball Integration
+
+Download the public [NCAA Basketball](https://www.kaggle.com/datasets/andrewsundberg/college-basketball-dataset) tables locally and extract the **men’s** CSVs into `data/raw/ncaa_basketball/`. Files such as `cbb.csv`, `cbb25.csv`, etc., are automatically detected as men’s data, while any `wbb`/women’s tables are logged and skipped. The dataset inventory report explicitly lists which files were ignored so you can confirm that women’s data never enters the modeling pipeline.
+
+Verify that both datasets are reachable by running:
+
+```bash
+python -m src.dataset_diagnostics \
+  --data-dir data/raw \
+  --include-supplemental-kaggle
+```
+
+This command writes:
+
+- `outputs/reports/local_dataset_inventory.json` – recursive file inventory with men’s/women’s classification (women’s files are marked `selected_for_use: false`)
+- `outputs/reports/supplemental_team_mapping_report.json` – mapping coverage and unmatched team names
+- `outputs/reports/supplemental_feature_summary.json` – supplemental feature counts and join coverage
+
+To compare the current baseline against “core + supplemental NCAA” features, run:
+
+```bash
+python -m src.experiments \
+  --data-dir data/raw \
+  --include-supplemental-kaggle
+```
+
+Set `--skip-backtests` if runtime becomes excessive. All supplemental signals remain optional—if the directory is empty, the pipeline logs a warning and falls back to the base March Madness features.
 
 ## Testing & CI
 

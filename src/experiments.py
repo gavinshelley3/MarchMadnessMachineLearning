@@ -41,6 +41,7 @@ FEATURE_SET_OFFSETS = {name: idx * 10 for idx, name in enumerate(sorted(availabl
 MODE_CHOICES = ("comparison", "ablation")
 DEFAULT_OUTPUT_PREFIX = "model"
 ABLATION_OUTPUT_PREFIX = "ablation"
+SUPPLEMENTAL_FEATURE_SET_NAME = "core_plus_supplemental_ncaa"
 
 
 @dataclass
@@ -503,7 +504,30 @@ def parse_args() -> argparse.Namespace:
         default="comparison",
         help="Select 'comparison' for the standard model comparison or 'ablation' for feature pruning studies.",
     )
+    parser.add_argument(
+        "--include-supplemental-kaggle",
+        action="store_true",
+        help="Include supplemental Kaggle NCAA Basketball features if available.",
+    )
+    parser.add_argument(
+        "--supplemental-dir",
+        type=Path,
+        default=None,
+        help="Override supplemental NCAA Basketball directory.",
+    )
     return parser.parse_args()
+
+
+def _default_feature_sets_for_mode(mode: str) -> List[str]:
+    if mode == "ablation":
+        return default_ablation_feature_sets()
+    return default_comparison_feature_sets()
+
+
+def _merge_supplemental_feature_set(feature_sets: List[str]) -> List[str]:
+    if SUPPLEMENTAL_FEATURE_SET_NAME in available_feature_sets() and SUPPLEMENTAL_FEATURE_SET_NAME not in feature_sets:
+        return feature_sets + [SUPPLEMENTAL_FEATURE_SET_NAME]
+    return feature_sets
 
 
 def main() -> None:
@@ -512,7 +536,14 @@ def main() -> None:
     if args.validation_start_season is not None:
         config.training.validation_start_season = args.validation_start_season
 
-    dataset, diagnostics = load_and_build_dataset(args.data_dir)
+    data_dir = args.data_dir if args.data_dir else config.paths.raw_data_dir
+    supplemental_dir = args.supplemental_dir if args.supplemental_dir else config.paths.supplemental_ncaa_dir
+    dataset, diagnostics = load_and_build_dataset(
+        data_dir,
+        include_supplemental_kaggle=args.include_supplemental_kaggle,
+        supplemental_dir=supplemental_dir,
+        reports_dir=config.paths.outputs_dir / "reports",
+    )
     feature_summary_path = config.paths.outputs_dir / "reports" / "feature_summary.json"
     save_feature_summary_report(diagnostics, feature_summary_path)
     diff_columns = sorted([col for col in dataset.columns if col.startswith("Diff_")])
@@ -520,14 +551,19 @@ def main() -> None:
     include_backtests = not args.skip_backtests
     mode = args.mode
 
+    if args.feature_sets:
+        feature_sets = list(args.feature_sets)
+    else:
+        feature_sets = _default_feature_sets_for_mode(mode)
+        if args.include_supplemental_kaggle:
+            feature_sets = _merge_supplemental_feature_set(feature_sets)
+
     if mode == "ablation":
-        feature_sets = args.feature_sets or default_ablation_feature_sets()
         model_names = ABLATION_MODEL_NAMES
         skip_empty = True
         output_prefix = ABLATION_OUTPUT_PREFIX
         summary_func = summarize_ablation_results
     else:
-        feature_sets = args.feature_sets or default_comparison_feature_sets()
         model_names = DEFAULT_MODEL_NAMES
         skip_empty = False
         output_prefix = DEFAULT_OUTPUT_PREFIX

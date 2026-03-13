@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -46,8 +46,18 @@ def write_json(path: Path, payload) -> None:
     path.write_text(json.dumps(payload, indent=2, default=_json_default))
 
 
-def build_datasets(data_dir: Path | None = None):
-    dataset, diagnostics = load_and_build_dataset(data_dir)
+def build_datasets(
+    data_dir: Path | None = None,
+    include_supplemental_kaggle: bool = False,
+    supplemental_dir: Optional[Path] = None,
+    reports_dir: Optional[Path] = None,
+):
+    dataset, diagnostics = load_and_build_dataset(
+        data_dir,
+        include_supplemental_kaggle=include_supplemental_kaggle,
+        supplemental_dir=supplemental_dir,
+        reports_dir=reports_dir,
+    )
     return dataset, diagnostics
 
 
@@ -82,8 +92,10 @@ def prepare_features(
     if not feature_cols:
         raise ValueError("No feature columns found. Ensure feature engineering ran correctly.")
     scaler = StandardScaler()
-    X_train = scaler.fit_transform(train_df[feature_cols])
-    X_val = scaler.transform(val_df[feature_cols])
+    train_values = train_df[feature_cols].fillna(0.0)
+    val_values = val_df[feature_cols].fillna(0.0)
+    X_train = scaler.fit_transform(train_values)
+    X_val = scaler.transform(val_values)
     y_train = train_df["Label"].values.astype(np.float32)
     y_val = val_df["Label"].values.astype(np.float32)
     return X_train, y_train, X_val, y_val, feature_cols, scaler
@@ -351,6 +363,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="First season to use for validation (inclusive). Overrides config.",
     )
+    parser.add_argument(
+        "--include-supplemental-kaggle",
+        action="store_true",
+        help="Include supplemental Kaggle NCAA Basketball features if available.",
+    )
     return parser.parse_args()
 
 
@@ -361,7 +378,12 @@ def main() -> None:
         config.training.validation_start_season = args.validation_start_season
     set_random_seed(config.training.random_seed)
 
-    dataset, diagnostics = build_datasets(args.data_dir)
+    dataset, diagnostics = build_datasets(
+        args.data_dir,
+        include_supplemental_kaggle=args.include_supplemental_kaggle,
+        supplemental_dir=config.paths.supplemental_ncaa_dir,
+        reports_dir=config.paths.outputs_dir / "reports",
+    )
     log_dataset_diagnostics(diagnostics)
     processed_path = config.paths.processed_data_dir / "matchup_dataset.csv"
     ensure_parent_dir(processed_path)

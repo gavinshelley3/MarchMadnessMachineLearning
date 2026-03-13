@@ -9,7 +9,12 @@ import pandas as pd
 
 from . import data_loading, dataset_builder
 from .feature_engineering import parse_numeric_seed
-from .feature_metadata import ADVANCED_FEATURE_COLUMNS
+from .feature_metadata import ADVANCED_FEATURE_COLUMNS, SUPPLEMENTAL_NCAA_FEATURES
+from .supplemental_ncaa import (
+    SupplementalDiagnostics,
+    build_supplemental_features,
+    save_supplemental_report,
+)
 
 
 @dataclass
@@ -32,10 +37,13 @@ class DatasetDiagnostics:
     advanced_feature_names: List[str] = field(default_factory=list)
     feature_summary_stats: Dict[str, Dict[str, float]] = field(default_factory=dict)
     massey_system: Optional[str] = None
+    supplemental_feature_count: int = 0
+    supplemental_feature_names: List[str] = field(default_factory=list)
+    supplemental_join_coverage: float = 0.0
+    supplemental_details: Dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, object]:
-        data = asdict(self)
-        return data
+        return asdict(self)
 
 
 def build_dataset_from_frames(
@@ -44,6 +52,8 @@ def build_dataset_from_frames(
     seeds: pd.DataFrame,
     massey_ordinals: Optional[pd.DataFrame] = None,
     massey_system: str | None = None,
+    supplemental_features: Optional[pd.DataFrame] = None,
+    supplemental_diagnostics: Optional[SupplementalDiagnostics] = None,
 ) -> Tuple[pd.DataFrame, DatasetDiagnostics]:
     dataset_raw = dataset_builder.build_matchup_dataset(
         regular_season_detailed,
@@ -51,6 +61,7 @@ def build_dataset_from_frames(
         seeds,
         massey_ordinals,
         massey_system=massey_system,
+        supplemental_features=supplemental_features,
     )
 
     rows_before = len(dataset_raw)
@@ -74,8 +85,15 @@ def build_dataset_from_frames(
     ]
     missing_feature_rows = dataset_raw[diff_cols].isna().any(axis=1).sum()
     team_feature_join_coverage = (
-        1.0 - (missing_feature_rows / rows_before)
-        if rows_before
+        1.0 - (missing_feature_rows / rows_before) if rows_before else 0.0
+    )
+    supplemental_diff_cols = [
+        col for col in diff_cols if col.replace("Diff_", "") in SUPPLEMENTAL_NCAA_FEATURES
+    ]
+    supplemental_join_coverage = (
+        1.0
+        - (dataset_raw[supplemental_diff_cols].isna().any(axis=1).sum() / rows_before)
+        if supplemental_diff_cols and rows_before
         else 0.0
     )
     feature_summary_stats = {
@@ -92,18 +110,12 @@ def build_dataset_from_frames(
         seeds.copy().assign(SeedNum=lambda df: df["Seed"].apply(parse_numeric_seed))["SeedNum"].notna().mean()
     )
     seed_cols = [col for col in dataset.columns if "SeedNum" in col]
-    seed_numeric_coverage = (
-        float(dataset[seed_cols].notna().mean().mean()) if seed_cols else 0.0
-    )
+    seed_numeric_coverage = float(dataset[seed_cols].notna().mean().mean()) if seed_cols else 0.0
     massey_cols = [col for col in dataset.columns if "MasseyOrdinal" in col]
-    massey_coverage = (
-        float(dataset[massey_cols].notna().mean().mean()) if massey_cols else 0.0
-    )
+    massey_coverage = float(dataset[massey_cols].notna().mean().mean()) if massey_cols else 0.0
 
     class_counts = dataset["Label"].value_counts().sort_index()
-    class_balance = {}
-    for label, count in class_counts.items():
-        class_balance[str(int(label))] = float(count / len(dataset))
+    class_balance = {str(int(label)): float(count / len(dataset)) for label, count in class_counts.items()}
     unique_matchups = dataset.shape[0] // 2
 
     diagnostics = DatasetDiagnostics(
@@ -125,27 +137,53 @@ def build_dataset_from_frames(
         advanced_feature_names=advanced_diff_cols,
         feature_summary_stats=feature_summary_stats,
         massey_system=massey_system,
+        supplemental_feature_count=len(supplemental_diff_cols),
+        supplemental_feature_names=supplemental_diff_cols,
+        supplemental_join_coverage=float(supplemental_join_coverage),
+        supplemental_details=supplemental_diagnostics.to_dict() if supplemental_diagnostics else {},
     )
     return dataset, diagnostics
 
 
 def load_and_build_dataset(
-    data_dir: Path | None = None, massey_system: str | None = None
+    data_dir: Path | None = None,
+    massey_system: str | None = None,
+    include_supplemental_kaggle: bool = False,
+    supplemental_dir: Optional[Path] = None,
+    reports_dir: Optional[Path] = None,
 ) -> Tuple[pd.DataFrame, DatasetDiagnostics]:
     regular = data_loading.load_regular_season_detailed_results(data_dir)
     tourney = data_loading.load_tourney_compact_results(data_dir)
     seeds = data_loading.load_tourney_seeds(data_dir)
+    teams = data_loading.load_teams(data_dir)
     massey = None
     try:
         massey = data_loading.load_massey_ordinals(data_dir)
     except FileNotFoundError:
         massey = None
+
+    supplemental_features = None
+    supplemental_diagnostics = None
+    if include_supplemental_kaggle:
+        supplemental_path = Path(supplemental_dir) if supplemental_dir else Path("data/raw/ncaa_basketball")
+        supplemental_features, supplemental_diagnostics = build_supplemental_features(
+            supplemental_path,
+            teams,
+        )
+        if supplemental_diagnostics and reports_dir:
+            save_supplemental_report(
+                supplemental_diagnostics,
+                Path(reports_dir) / "supplemental_team_mapping_report.json",
+            )
+
     return build_dataset_from_frames(
         regular,
         tourney,
         seeds,
         massey_ordinals=massey,
         massey_system=massey_system,
+        supplemental_features=supplemental_features,
+        supplemental_diagnostics=supplemental_diagnostics,
     )
 
 
@@ -157,5 +195,8 @@ def save_feature_summary_report(diagnostics: DatasetDiagnostics, output_path: Pa
         "advanced_feature_columns": diagnostics.advanced_feature_names,
         "feature_null_counts": diagnostics.feature_null_counts,
         "feature_summary_stats": diagnostics.feature_summary_stats,
+        "supplemental_feature_count": diagnostics.supplemental_feature_count,
+        "supplemental_feature_columns": diagnostics.supplemental_feature_names,
+        "supplemental_join_coverage": diagnostics.supplemental_join_coverage,
     }
     output_path.write_text(json.dumps(payload, indent=2))
