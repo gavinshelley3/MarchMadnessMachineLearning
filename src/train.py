@@ -125,13 +125,26 @@ def run_seed_baseline(val_df: pd.DataFrame) -> np.ndarray:
     return probs.astype(np.float32)
 
 
+def fit_logistic_regression_model(
+    X: np.ndarray,
+    y: np.ndarray,
+) -> LogisticRegression:
+    """Fit a logistic regression classifier and return the trained estimator."""
+
+    unique = np.unique(y)
+    if len(unique) < 2:
+        raise ValueError("Logistic regression requires at least two classes.")
+    model = LogisticRegression(max_iter=1000, solver="lbfgs")
+    model.fit(X, y)
+    return model
+
+
 def run_logistic_regression_baseline(
     X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray
 ) -> np.ndarray:
     if len(np.unique(y_train)) < 2:
         return np.full(len(X_val), float(np.unique(y_train)[0]))
-    model = LogisticRegression(max_iter=1000, solver="lbfgs")
-    model.fit(X_train, y_train)
+    model = fit_logistic_regression_model(X_train, y_train)
     return model.predict_proba(X_val)[:, 1]
 
 

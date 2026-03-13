@@ -155,3 +155,22 @@ GitHub Actions (`.github/workflows/ci.yml`) enforces the same tests on pushes an
 - Explore alternative models (gradient boosting, calibrated ensembles), then wire them into the existing evaluation harness.
 - Layer in bracket simulation once matchup predictions are reliable.
 - Add GPU-enabled Colab notebooks for faster experimentation.
+
+## 2026 Inference Pipeline
+
+The locked production configuration is **logistic regression** trained on the core_plus_opponent_adjustment feature set. The CLI below ensures the production artifacts exist (training and saving them under outputs/models/production/ if necessary) and then scores every 2026 matchup listed in Kaggle’s SampleSubmissionStage2.csv.
+
+`ash
+python -m src.predict_2026 --data-dir data/raw
+` 
+
+Key behaviors:
+
+- Looks up (or retrains, with --force-retrain) the production logistic model + scaler.
+- Builds 2026 regular-season team features, joins the 2026 tournament teams from the sample submission, and creates pairwise diff features.
+- Saves predictions under outputs/predictions/:
+  - 2026_matchup_predictions.csv – probabilities, seeds, team names, and the predicted winner for every Kaggle matchup ID.
+  - 2026_prediction_metadata.json – provenance, artifact metadata, coverage stats, and file paths for reproducibility.
+
+Need a different bracket file? Pass --sample-submission path/to/file.csv. Use --force-retrain any time you want to regenerate the production model artifacts from scratch.
+

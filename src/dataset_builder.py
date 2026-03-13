@@ -69,13 +69,14 @@ def _build_ordered_matchups(
     context: pd.DataFrame,
     team_a_col: str,
     team_b_col: str,
-    label: int,
+    label: Optional[int],
     diff_feature_names: Sequence[str],
 ) -> pd.DataFrame:
     ordered = games.copy()
     ordered = _attach_team_context(ordered, context, team_a_col, "Team1_", "Team1ID")
     ordered = _attach_team_context(ordered, context, team_b_col, "Team2_", "Team2ID")
-    ordered["Label"] = label
+    if label is not None:
+        ordered["Label"] = label
 
     for feature in diff_feature_names:
         col_a = f"Team1_{feature}"
@@ -91,6 +92,27 @@ def _build_ordered_matchups(
         + ordered["Team2ID"].astype(str)
     )
     return ordered
+
+
+def _finalize_dataset(dataset: pd.DataFrame) -> pd.DataFrame:
+    metadata_cols: List[str] = [
+        "MatchupID",
+        "Season",
+        "DayNum",
+        "Team1ID",
+        "Team2ID",
+        "Team1_Seed",
+        "Team1_SeedNum",
+        "Team1_MasseyOrdinal",
+        "Team2_Seed",
+        "Team2_SeedNum",
+        "Team2_MasseyOrdinal",
+        "Label",
+    ]
+    metadata_cols = [col for col in metadata_cols if col in dataset.columns]
+    diff_cols = sorted([col for col in dataset.columns if col.startswith("Diff_")])
+    ordered_cols = metadata_cols + diff_cols
+    return dataset[ordered_cols]
 
 
 def build_matchup_dataset(
@@ -136,23 +158,22 @@ def build_matchup_dataset(
         diff_feature_names=numeric_features,
     )
     dataset = pd.concat([positive, negative], ignore_index=True)
+    return _finalize_dataset(dataset)
 
-    metadata_cols: List[str] = [
-        "MatchupID",
-        "Season",
-        "DayNum",
-        "Team1ID",
-        "Team2ID",
-        "Team1_Seed",
-        "Team1_SeedNum",
-        "Team1_MasseyOrdinal",
-        "Team2_Seed",
-        "Team2_SeedNum",
-        "Team2_MasseyOrdinal",
-        "Label",
-    ]
-    metadata_cols = [col for col in metadata_cols if col in dataset.columns]
-    diff_cols = sorted([col for col in dataset.columns if col.startswith("Diff_")])
-    ordered_cols = metadata_cols + diff_cols
-    dataset = dataset[ordered_cols]
-    return dataset
+
+def build_pairwise_inference_dataset(
+    context: pd.DataFrame,
+    matchups: pd.DataFrame,
+    diff_feature_names: Sequence[str],
+) -> pd.DataFrame:
+    """Construct matchup-level features for inference-only combinations."""
+
+    dataset = _build_ordered_matchups(
+        matchups,
+        context,
+        team_a_col="Team1ID",
+        team_b_col="Team2ID",
+        label=None,
+        diff_feature_names=diff_feature_names,
+    )
+    return _finalize_dataset(dataset)
