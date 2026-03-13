@@ -201,9 +201,6 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-# Editor-specific settings
-.vscode/
-
 # Large archives (e.g., Kaggle downloads)
 *.zip
 !march-machine-learning-mania-2026.zip
