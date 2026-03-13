@@ -113,6 +113,22 @@ This command rebuilds the dataset, evaluates the seed baseline, logistic regress
 - `feature_set_summary.json` – descriptions and column counts per feature set.
 - `experiment_config.json` – reproducibility details (feature sets, models, splits, validation season).
 
+## Feature Ablation and Pruning Experiments
+
+To understand which advanced feature groups actually help, run the ablation workflow:
+
+```bash
+python -m src.experiments --data-dir data/raw --validation-start-season 2015 --mode ablation
+```
+
+The ablation mode compares `core` against targeted additions (`core_plus_efficiency`, `core_plus_recent_form`, etc.) using logistic regression and the neural net on the main validation split and rolling backtests. It produces:
+
+- `ablation_comparison.csv` – per-split metrics for each model/feature-set pair in the ablation study.
+- `ablation_summary.json` – derived conclusions (best trimmed set per model, improvement vs `core`, which groups to prune, recommended next configuration).
+- `ablation_feature_set_summary.json` & `ablation_config.json` – descriptions and reproducibility metadata for the ablation run.
+
+Inspect `ablation_summary.json` to see whether a feature group improves log loss relative to `core`, and to identify consistently harmful groups.
+
 ## Testing & CI
 
 Run the test suite locally with:
