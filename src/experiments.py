@@ -503,6 +503,11 @@ def parse_args() -> argparse.Namespace:
         default="comparison",
         help="Select 'comparison' for the standard model comparison or 'ablation' for feature pruning studies.",
     )
+    parser.add_argument(
+        "--include-supplemental-kaggle",
+        action="store_true",
+        help="Include supplemental Kaggle NCAA Basketball features if available.",
+    )
     return parser.parse_args()
 
 
@@ -512,13 +517,21 @@ def main() -> None:
     if args.validation_start_season is not None:
         config.training.validation_start_season = args.validation_start_season
 
-    dataset, diagnostics = load_and_build_dataset(args.data_dir)
+    reports_dir = config.paths.outputs_dir / "reports"
+    dataset, diagnostics = load_and_build_dataset(
+        args.data_dir,
+        include_supplemental_kaggle=args.include_supplemental_kaggle,
+        reports_dir=reports_dir,
+    )
     feature_summary_path = config.paths.outputs_dir / "reports" / "feature_summary.json"
     save_feature_summary_report(diagnostics, feature_summary_path)
     diff_columns = sorted([col for col in dataset.columns if col.startswith("Diff_")])
 
     include_backtests = not args.skip_backtests
     mode = args.mode
+    supplemental_available = bool(diagnostics.supplemental_feature_count)
+    if args.include_supplemental_kaggle and not supplemental_available:
+        print("Supplemental Kaggle features requested but not found. Proceeding with baseline features.")
 
     if mode == "ablation":
         feature_sets = args.feature_sets or default_ablation_feature_sets()
@@ -527,7 +540,12 @@ def main() -> None:
         output_prefix = ABLATION_OUTPUT_PREFIX
         summary_func = summarize_ablation_results
     else:
-        feature_sets = args.feature_sets or default_comparison_feature_sets()
+        if args.feature_sets:
+            feature_sets = args.feature_sets
+        elif args.include_supplemental_kaggle and supplemental_available:
+            feature_sets = ["core_plus_opponent_adjustment", "core_plus_supplemental_ncaa"]
+        else:
+            feature_sets = default_comparison_feature_sets()
         model_names = DEFAULT_MODEL_NAMES
         skip_empty = False
         output_prefix = DEFAULT_OUTPUT_PREFIX

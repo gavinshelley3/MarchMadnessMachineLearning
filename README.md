@@ -180,6 +180,27 @@ python -m src.render_bracket_view \
 
 Both flags are optional; by default the script will use the latest `_bracket_results.json` in `outputs/brackets/` and will write to `outputs/final_report/bracket_view.html`. Open the resulting HTML file locally to review the entire bracket without rerunning the pipeline.
 
+## Supplemental Kaggle NCAA Basketball Integration
+
+You can optionally enrich the modeling dataset with tempo/strength metrics from Kaggle's NCAA Basketball dataset. Place the desired CSVs (start with `mbb_historical_teams_seasons.csv`, `mbb_historical_teams_games.csv`, and `mbb_teams.csv`) under `data/raw/ncaa_basketball/`, then run diagnostics with the supplemental flag:
+
+```bash
+python -m src.dataset_diagnostics \
+  --data-dir data/raw \
+  --include-supplemental-kaggle
+```
+
+Team-mapping and feature coverage summaries are saved to `outputs/reports/supplemental_team_mapping_report.json` and `outputs/reports/supplemental_feature_summary.json`. To test whether the new features help, rerun the experiment runner with the same flag (it automatically compares the current baseline against `core_plus_supplemental_ncaa`):
+
+```bash
+python -m src.experiments \
+  --mode comparison \
+  --include-supplemental-kaggle \
+  --skip-backtests
+```
+
+The supplemental path remains optional—if the supplemental files are missing, the pipeline logs a warning and falls back to the base March Madness features.
+
 ## Testing & CI
 
 Run the test suite locally with:

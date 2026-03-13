@@ -46,8 +46,16 @@ def write_json(path: Path, payload) -> None:
     path.write_text(json.dumps(payload, indent=2, default=_json_default))
 
 
-def build_datasets(data_dir: Path | None = None):
-    dataset, diagnostics = load_and_build_dataset(data_dir)
+def build_datasets(
+    data_dir: Path | None = None,
+    include_supplemental_kaggle: bool = False,
+):
+    config = get_config()
+    dataset, diagnostics = load_and_build_dataset(
+        data_dir,
+        include_supplemental_kaggle=include_supplemental_kaggle,
+        reports_dir=config.paths.outputs_dir / "reports",
+    )
     return dataset, diagnostics
 
 
@@ -351,6 +359,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="First season to use for validation (inclusive). Overrides config.",
     )
+    parser.add_argument(
+        "--include-supplemental-kaggle",
+        action="store_true",
+        help="Include supplemental Kaggle NCAA Basketball features if available.",
+    )
     return parser.parse_args()
 
 
@@ -361,7 +374,10 @@ def main() -> None:
         config.training.validation_start_season = args.validation_start_season
     set_random_seed(config.training.random_seed)
 
-    dataset, diagnostics = build_datasets(args.data_dir)
+    dataset, diagnostics = build_datasets(
+        args.data_dir,
+        include_supplemental_kaggle=getattr(args, "include_supplemental_kaggle", False),
+    )
     log_dataset_diagnostics(diagnostics)
     processed_path = config.paths.processed_data_dir / "matchup_dataset.csv"
     ensure_parent_dir(processed_path)

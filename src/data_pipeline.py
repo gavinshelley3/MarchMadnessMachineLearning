@@ -8,8 +8,14 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from . import data_loading, dataset_builder
+from .config import get_config
 from .feature_engineering import parse_numeric_seed
-from .feature_metadata import ADVANCED_FEATURE_COLUMNS
+from .feature_metadata import ADVANCED_FEATURE_COLUMNS, SUPPLEMENTAL_FEATURES
+from .supplemental_ncaa import (
+    SupplementalDiagnostics,
+    build_supplemental_features,
+    save_supplemental_report,
+)
 
 
 @dataclass
@@ -32,6 +38,10 @@ class DatasetDiagnostics:
     advanced_feature_names: List[str] = field(default_factory=list)
     feature_summary_stats: Dict[str, Dict[str, float]] = field(default_factory=dict)
     massey_system: Optional[str] = None
+    supplemental_feature_count: int = 0
+    supplemental_feature_names: List[str] = field(default_factory=list)
+    supplemental_join_coverage: float = 0.0
+    supplemental_details: Dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, object]:
         data = asdict(self)
@@ -44,6 +54,8 @@ def build_dataset_from_frames(
     seeds: pd.DataFrame,
     massey_ordinals: Optional[pd.DataFrame] = None,
     massey_system: str | None = None,
+    supplemental_features: Optional[pd.DataFrame] = None,
+    supplemental_diagnostics: Optional[SupplementalDiagnostics] = None,
 ) -> Tuple[pd.DataFrame, DatasetDiagnostics]:
     dataset_raw = dataset_builder.build_matchup_dataset(
         regular_season_detailed,
@@ -51,6 +63,7 @@ def build_dataset_from_frames(
         seeds,
         massey_ordinals,
         massey_system=massey_system,
+        supplemental_features=supplemental_features,
     )
 
     rows_before = len(dataset_raw)
@@ -72,10 +85,19 @@ def build_dataset_from_frames(
     advanced_diff_cols = [
         col for col in diff_cols if col.replace("Diff_", "") in ADVANCED_FEATURE_COLUMNS
     ]
+    supplemental_diff_cols = [
+        col for col in diff_cols if col.replace("Diff_", "") in SUPPLEMENTAL_FEATURES
+    ]
     missing_feature_rows = dataset_raw[diff_cols].isna().any(axis=1).sum()
     team_feature_join_coverage = (
         1.0 - (missing_feature_rows / rows_before)
         if rows_before
+        else 0.0
+    )
+    supplemental_join_coverage = (
+        1.0
+        - (dataset_raw[supplemental_diff_cols].isna().any(axis=1).sum() / rows_before)
+        if supplemental_diff_cols and rows_before
         else 0.0
     )
     feature_summary_stats = {
@@ -125,13 +147,23 @@ def build_dataset_from_frames(
         advanced_feature_names=advanced_diff_cols,
         feature_summary_stats=feature_summary_stats,
         massey_system=massey_system,
+        supplemental_feature_count=len(supplemental_diff_cols),
+        supplemental_feature_names=supplemental_diff_cols,
+        supplemental_join_coverage=float(supplemental_join_coverage),
+        supplemental_details=supplemental_diagnostics.to_dict()
+        if supplemental_diagnostics
+        else {},
     )
     return dataset, diagnostics
 
 
 def load_and_build_dataset(
-    data_dir: Path | None = None, massey_system: str | None = None
+    data_dir: Path | None = None,
+    massey_system: str | None = None,
+    include_supplemental_kaggle: bool = False,
+    reports_dir: Optional[Path] = None,
 ) -> Tuple[pd.DataFrame, DatasetDiagnostics]:
+    config = get_config()
     regular = data_loading.load_regular_season_detailed_results(data_dir)
     tourney = data_loading.load_tourney_compact_results(data_dir)
     seeds = data_loading.load_tourney_seeds(data_dir)
@@ -140,12 +172,28 @@ def load_and_build_dataset(
         massey = data_loading.load_massey_ordinals(data_dir)
     except FileNotFoundError:
         massey = None
+    supplemental_features = None
+    supplemental_diag = None
+    if include_supplemental_kaggle:
+        try:
+            teams = data_loading.load_teams(data_dir)
+        except FileNotFoundError:
+            teams = None
+        supplemental_features, supplemental_diag = build_supplemental_features(
+            config.paths.supplemental_ncaa_dir, teams
+        )
+        if reports_dir is not None and supplemental_diag is not None:
+            report_path = Path(reports_dir) / "supplemental_team_mapping_report.json"
+            save_supplemental_report(supplemental_diag, report_path)
+
     return build_dataset_from_frames(
         regular,
         tourney,
         seeds,
         massey_ordinals=massey,
         massey_system=massey_system,
+        supplemental_features=supplemental_features,
+        supplemental_diagnostics=supplemental_diag,
     )
 
 
@@ -157,5 +205,8 @@ def save_feature_summary_report(diagnostics: DatasetDiagnostics, output_path: Pa
         "advanced_feature_columns": diagnostics.advanced_feature_names,
         "feature_null_counts": diagnostics.feature_null_counts,
         "feature_summary_stats": diagnostics.feature_summary_stats,
+        "supplemental_feature_count": diagnostics.supplemental_feature_count,
+        "supplemental_feature_columns": diagnostics.supplemental_feature_names,
+        "supplemental_join_coverage": diagnostics.supplemental_join_coverage,
     }
     output_path.write_text(json.dumps(payload, indent=2))

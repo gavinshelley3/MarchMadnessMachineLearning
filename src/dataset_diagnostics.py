@@ -35,12 +35,19 @@ def main() -> None:
         default=None,
         help="Optional path to save the modeling dataset CSV.",
     )
+    parser.add_argument(
+        "--include-supplemental-kaggle",
+        action="store_true",
+        help="Include supplemental Kaggle NCAA Basketball features if available.",
+    )
     args = parser.parse_args()
 
     config = get_config()
     dataset, diagnostics = load_and_build_dataset(
         data_dir=args.data_dir,
         massey_system=args.massey_system,
+        include_supplemental_kaggle=args.include_supplemental_kaggle,
+        reports_dir=config.paths.outputs_dir / "reports",
     )
 
     save_path = args.save_dataset or (config.paths.processed_data_dir / "matchup_dataset.csv")
@@ -53,6 +60,11 @@ def main() -> None:
     diagnostics_path.write_text(json.dumps(diagnostics.to_dict(), indent=2))
     feature_summary_path = reports_dir / "feature_summary.json"
     save_feature_summary_report(diagnostics, feature_summary_path)
+    if diagnostics.supplemental_details:
+        supplemental_summary_path = reports_dir / "supplemental_feature_summary.json"
+        supplemental_summary_path.write_text(
+            json.dumps(diagnostics.supplemental_details, indent=2)
+        )
 
     print("Dataset saved to", save_path)
     print("Diagnostics saved to", diagnostics_path)
@@ -73,6 +85,14 @@ def main() -> None:
     print(f"Massey coverage in modeling set: {format_percentage(diagnostics.massey_coverage)}")
     print(f"Feature columns: {diagnostics.feature_count}")
     print(f"Advanced feature columns present: {diagnostics.advanced_feature_count}")
+    if diagnostics.supplemental_feature_count:
+        print(
+            f"Supplemental Kaggle diff columns: {diagnostics.supplemental_feature_count} "
+            f"(coverage: {format_percentage(diagnostics.supplemental_join_coverage)})"
+        )
+    else:
+        if args.include_supplemental_kaggle:
+            print("Supplemental Kaggle features requested but none were available.")
     print("Class balance:")
     for label, pct in diagnostics.class_balance.items():
         print(f"  label {label}: {format_percentage(pct)}")

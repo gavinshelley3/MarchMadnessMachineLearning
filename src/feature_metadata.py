@@ -67,6 +67,14 @@ NEUTRAL_CONTEXT_FEATURES: List[str] = [
     "NeutralScoringMargin",
 ]
 
+SUPPLEMENTAL_FEATURES: List[str] = [
+    "SuppTempo",
+    "SuppAdjNetRating",
+    "SuppStrengthOfSchedule",
+    "SuppCloseGameWinPct",
+    "SuppNeutralWinPct",
+]
+
 FEATURE_GROUPS: Dict[str, List[str]] = {
     "core": CORE_FEATURE_COLUMNS,
     "efficiency": EFFICIENCY_FEATURES,
@@ -75,6 +83,7 @@ FEATURE_GROUPS: Dict[str, List[str]] = {
     "recent_form": RECENT_FORM_FEATURES,
     "opponent_adjustment": OPPONENT_ADJUSTMENT_FEATURES,
     "neutral_context": NEUTRAL_CONTEXT_FEATURES,
+    "supplemental_ncaa": SUPPLEMENTAL_FEATURES,
 }
 
 ADVANCED_GROUP_NAMES: List[str] = [name for name in FEATURE_GROUPS if name != "core"]
@@ -95,6 +104,7 @@ FEATURE_SET_DEFINITIONS: Dict[str, List[str]] = {
     "core_plus_opponent_adjustment": ["core", "opponent_adjustment"],
     "core_plus_neutral_context": ["core", "neutral_context"],
     "core_plus_rebound_turnover": ["core", "rebound_turnover"],
+    "core_plus_supplemental_ncaa": ["core", "supplemental_ncaa"],
     "core_plus_all_advanced": _all_groups_except_core(),
     "advanced": _all_groups_except_core(),
 }
@@ -107,6 +117,7 @@ FEATURE_SET_DESCRIPTIONS: Dict[str, str] = {
     "core_plus_opponent_adjustment": "Core + opponent-adjusted scoring margin.",
     "core_plus_neutral_context": "Core + neutral-site win rate/margin.",
     "core_plus_rebound_turnover": "Core + rebound/turnover margin features.",
+    "core_plus_supplemental_ncaa": "Core + NCAA Basketball supplemental tempo/strength metrics.",
     "core_plus_all_advanced": "Core + every advanced feature group currently available.",
     "advanced": "Core features plus the entire advanced bundle.",
 }
