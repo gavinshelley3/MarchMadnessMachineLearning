@@ -168,6 +168,18 @@ Outputs (written to `outputs/brackets/`) include:
 
 Swap `--bracket-file` once the official bracket is available, and adjust `--n-sims`/`--seed` to trade runtime for smoother probability estimates.
 
+## Bracket Visualization
+
+To create a presentation-friendly HTML page that shows every round, regional path, deterministic winners, and the probabilities powering each game, run:
+
+```bash
+python -m src.render_bracket_view \
+  --bracket-results outputs/brackets/2026_projected_bracket_results.json \
+  --output outputs/final_report/bracket_view.html
+```
+
+Both flags are optional; by default the script will use the latest `_bracket_results.json` in `outputs/brackets/` and will write to `outputs/final_report/bracket_view.html`. Open the resulting HTML file locally to review the entire bracket without rerunning the pipeline.
+
 ## Testing & CI
 
 Run the test suite locally with:
