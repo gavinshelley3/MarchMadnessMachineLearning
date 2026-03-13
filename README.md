@@ -129,6 +129,24 @@ The ablation mode compares `core` against targeted additions (`core_plus_efficie
 
 Inspect `ablation_summary.json` to see whether a feature group improves log loss relative to `core`, and to identify consistently harmful groups.
 
+## 2026 Bracket Generation
+
+Once matchup probabilities are saved (see `outputs/predictions/2026_matchup_predictions.csv`), you can turn them into a deterministic projected bracket. The bracket structure itself is stored as editable JSON so the projected field can be replaced with the official bracket when it is announced.
+
+1. Edit or replace `data/brackets/projected_2026_bracket.json` with the desired bracket structure.
+2. Generate the bracket:
+   ```bash
+   python -m src.generate_bracket --bracket-file data/brackets/projected_2026_bracket.json \
+       --predictions-file outputs/predictions/2026_matchup_predictions.csv
+   ```
+3. Outputs land in `outputs/brackets/`:
+   - `*_bracket_results.json` – structured per-round breakdown plus metadata about the model and unresolved play-in slots.
+   - `*_bracket_results.csv` – flat table of every game with probabilities and winners.
+   - `*_bracket_summary.txt` – quick human-readable recap (Final Four, champion, notes).
+   - `*_top_upsets.csv` – optional list of higher-seed wins with the highest model confidence.
+
+Use the `--bracket-file` flag to point to the official bracket JSON once it is released.
+
 ## Testing & CI
 
 Run the test suite locally with:
