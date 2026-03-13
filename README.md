@@ -7,7 +7,7 @@ A deep learning class project built around the Kaggle March Machine Learning Man
 ```
 .
 +-- data/
-|   +-- raw/        # Place Kaggle CSVs here (ignored by git)
+|   +-- raw/        # Kaggle CSVs checked into git for reproducibility
 |   +-- processed/
 +-- notebooks/
 |   +-- 01_data_inspection.ipynb
@@ -100,18 +100,41 @@ Review `outputs/reports/` for calibration, upset handling, seed-gap performance,
 
 ## Model Comparison Experiments
 
-Use the experiment runner to compare feature sets and model families:
+Use the experiment runner to compare feature sets and model families (--mode comparison is the default):
 
-```bash
-python -m src.experiments --data-dir data/raw --validation-start-season 2015
-```
+`ash
+python -m src.experiments --data-dir data/raw --validation-start-season 2015 --mode comparison
+`
 
-This command rebuilds the dataset, evaluates the seed baseline, logistic regression, and the neural net across the core-only and advanced feature sets, and replays the rolling backtests. It writes the following artifacts to `outputs/reports/`:
+This command rebuilds the dataset, evaluates the seed baseline, logistic regression, and the neural net across the core-only and advanced feature sets, and replays the rolling backtests. It writes the following artifacts to outputs/reports/:
 
-- `model_comparison.csv` â€“ per-split metrics (log loss, Brier score, ROC AUC, accuracy) for every feature-set/model pair.
-- `model_comparison_summary.json` â€“ key conclusions (best validation config, backtest improvements, neural vs. logistic wins).
-- `feature_set_summary.json` â€“ descriptions and column counts per feature set.
-- `experiment_config.json` â€“ reproducibility details (feature sets, models, splits, validation season).
+- model_comparison.csv – per-split metrics (log loss, Brier score, ROC AUC, accuracy) for every feature-set/model pair.
+- model_comparison_summary.json – key conclusions (best validation config, backtest improvements, neural vs. logistic wins).
+- eature_set_summary.json – descriptions and column counts per feature set.
+- experiment_config.json – reproducibility details (feature sets, models, splits, validation season, chosen mode).
+
+## Feature Ablation and Pruning Experiments
+
+Identify which advanced feature families add signal on top of the core slate:
+
+`ash
+python -m src.experiments --data-dir data/raw --validation-start-season 2015 --mode ablation
+`
+
+Artifacts (blation_comparison.csv, blation_summary.json) quantify improvements vs. the core baseline for each model and feature group, and summarize rolling backtest performance.
+
+## Final Model Selection Experiments
+
+Promote the strongest feature sets and models before bracket simulation:
+
+`ash
+python -m src.experiments --data-dir data/raw --validation-start-season 2015 --mode final
+`
+
+This mode restricts comparisons to the finalist configurations (logistic regression with core_plus_opponent_adjustment, neural net with core, optional gradient boosting) and produces:
+
+- inal_model_comparison.csv – split-by-split metrics for every finalist pair.
+- inal_model_summary.json – best validation/backtest performers, per-model averages, ranked configurations, and the recommended production choice for future brackets.
 
 ## Testing & CI
 

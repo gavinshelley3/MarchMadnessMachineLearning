@@ -14,11 +14,14 @@ from .data_pipeline import load_and_build_dataset, save_feature_summary_report
 from .evaluate import compute_metrics
 from .feature_metadata import (
     available_feature_sets,
+    ablation_feature_sets,
     describe_feature_sets,
+    final_feature_sets,
     select_diff_columns,
 )
 from .train import (
     prepare_features,
+    run_gradient_boosting_baseline,
     run_logistic_regression_baseline,
     run_seed_baseline,
     time_based_split,
@@ -32,9 +35,42 @@ BACKTEST_SPLITS = [
     (2018, 2019),
     (2020, 2021),
 ]
-MODEL_NAMES: Sequence[str] = ("seed_baseline", "logistic_regression", "neural_net")
-MODEL_SEED_OFFSETS = {"seed_baseline": 0, "logistic_regression": 1, "neural_net": 2}
-FEATURE_SET_OFFSETS = {"core": 0, "advanced": 10}
+ALL_FEATURE_SETS: Sequence[str] = tuple(available_feature_sets())
+FEATURE_SET_OFFSETS = {name: idx * 10 for idx, name in enumerate(ALL_FEATURE_SETS)}
+MODEL_SEED_OFFSETS = {
+    "seed_baseline": 0,
+    "logistic_regression": 1,
+    "neural_net": 2,
+    "gradient_boosting": 3,
+}
+
+MODE_MODEL_MAP: Dict[str, Sequence[str]] = {
+    "comparison": ("seed_baseline", "logistic_regression", "neural_net"),
+    "ablation": ("logistic_regression", "neural_net"),
+    "final": ("logistic_regression", "neural_net", "gradient_boosting"),
+}
+
+def _dedupe_preserve_order(items: Sequence[str]) -> List[str]:
+    seen = set()
+    ordered: List[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            ordered.append(item)
+    return ordered
+
+
+MODE_FEATURE_SET_DEFAULTS: Dict[str, List[str]] = {
+    "comparison": ["core", "advanced"],
+    "ablation": _dedupe_preserve_order(["core"] + ablation_feature_sets()),
+    "final": _dedupe_preserve_order(final_feature_sets()),
+}
+
+MODE_OUTPUT_FILENAMES: Dict[str, tuple[str, str]] = {
+    "comparison": ("model_comparison.csv", "model_comparison_summary.json"),
+    "ablation": ("ablation_comparison.csv", "ablation_summary.json"),
+    "final": ("final_model_comparison.csv", "final_model_summary.json"),
+}
 
 
 @dataclass
@@ -128,6 +164,7 @@ def run_experiments(
     config,
     feature_sets: Sequence[str],
     include_backtests: bool,
+    model_names: Sequence[str],
 ) -> pd.DataFrame:
     splits = build_splits(dataset, config.training.validation_start_season, include_backtests)
     results: List[Dict[str, object]] = []
@@ -141,40 +178,64 @@ def run_experiments(
                 split.train_df, split.val_df, selected_cols
             )
 
-            # Seed baseline (independent of feature set but we report per set for completeness)
-            seed_probs = run_seed_baseline(split.val_df)
-            seed_metrics, _ = compute_metrics(y_val, seed_probs)
-            seed_row = _base_result_row(split, feature_set, "seed_baseline", 1)
-            seed_row.update(_format_metrics(seed_metrics))
-            results.append(seed_row)
+            for model_name in model_names:
+                feature_count = len(feature_cols)
+                if model_name == "seed_baseline":
+                    seed_probs = run_seed_baseline(split.val_df)
+                    metrics, _ = compute_metrics(y_val, seed_probs)
+                    feature_count = 1
+                elif model_name == "logistic_regression":
+                    seed_value = _seed_for_variant(
+                        config.training.random_seed, split_index, feature_set, model_name
+                    )
+                    set_random_seed(seed_value)
+                    probs = run_logistic_regression_baseline(X_train, y_train, X_val)
+                    metrics, _ = compute_metrics(y_val, probs)
+                elif model_name == "neural_net":
+                    set_random_seed(
+                        _seed_for_variant(
+                            config.training.random_seed, split_index, feature_set, model_name
+                        )
+                    )
+                    _, nn_metrics, _, _ = train_with_arrays(
+                        X_train, y_train, X_val, y_val, config
+                    )
+                    metrics = nn_metrics
+                elif model_name == "gradient_boosting":
+                    seed_value = _seed_for_variant(
+                        config.training.random_seed, split_index, feature_set, model_name
+                    )
+                    set_random_seed(seed_value)
+                    probs = run_gradient_boosting_baseline(
+                        X_train, y_train, X_val, random_state=seed_value
+                    )
+                    metrics, _ = compute_metrics(y_val, probs)
+                else:
+                    raise ValueError(f"Unsupported model '{model_name}'.")
 
-            # Logistic regression
-            set_random_seed(_seed_for_variant(config.training.random_seed, split_index, feature_set, "logistic_regression"))
-            logit_probs = run_logistic_regression_baseline(X_train, y_train, X_val)
-            logit_metrics, _ = compute_metrics(y_val, logit_probs)
-            logistic_row = _base_result_row(split, feature_set, "logistic_regression", len(feature_cols))
-            logistic_row.update(_format_metrics(logit_metrics))
-            results.append(logistic_row)
-
-            # Neural network
-            set_random_seed(_seed_for_variant(config.training.random_seed, split_index, feature_set, "neural_net"))
-            _, nn_metrics, _, _ = train_with_arrays(
-                X_train, y_train, X_val, y_val, config
-            )
-            nn_row = _base_result_row(split, feature_set, "neural_net", len(feature_cols))
-            nn_row.update(_format_metrics(nn_metrics))
-            results.append(nn_row)
+                row = _base_result_row(split, feature_set, model_name, feature_count)
+                row.update(_format_metrics(metrics))
+                results.append(row)
 
     return pd.DataFrame(results)
 
 
-def summarize_results(results: pd.DataFrame) -> Dict[str, object]:
+def summarize_results(results: pd.DataFrame, mode: str) -> Dict[str, object]:
     if results.empty:
         return {"message": "No experiment results generated."}
+    if mode == "ablation":
+        return _summarize_ablation_results(results)
+    if mode == "final":
+        return _summarize_final_results(results)
+    return _summarize_comparison_results(results)
 
-    summary: Dict[str, object] = {
-        "feature_sets": describe_feature_sets(),
-    }
+
+def _base_summary_dict() -> Dict[str, object]:
+    return {"feature_sets": describe_feature_sets()}
+
+
+def _summarize_comparison_results(results: pd.DataFrame) -> Dict[str, object]:
+    summary: Dict[str, object] = _base_summary_dict()
     main_df = results[results["split_name"] == "main_validation"]
     conclusions: List[str] = []
     if not main_df.empty:
@@ -259,7 +320,120 @@ def summarize_results(results: pd.DataFrame) -> Dict[str, object]:
 
     if conclusions:
         summary["conclusions"] = conclusions
+    return summary
 
+
+def _summarize_ablation_results(results: pd.DataFrame) -> Dict[str, object]:
+    summary: Dict[str, object] = _base_summary_dict()
+    main_df = results[results["split_name"] == "main_validation"]
+    per_model_best: Dict[str, Dict[str, float]] = {}
+    improvements: Dict[str, Dict[str, float]] = {}
+    if not main_df.empty:
+        for model_name, group in main_df.groupby("model_name"):
+            best = group.loc[group["log_loss"].idxmin()]
+            per_model_best[model_name] = {
+                "feature_set": best["feature_set"],
+                "log_loss": float(best["log_loss"]),
+                "accuracy": float(best["accuracy"]),
+            }
+            core_row = group[group["feature_set"] == "core"]
+            if core_row.empty:
+                continue
+            core_loss = float(core_row["log_loss"].iloc[0])
+            improvements[model_name] = {}
+            for _, row in group.iterrows():
+                fs = row["feature_set"]
+                if fs == "core":
+                    continue
+                improvements[model_name][fs] = core_loss - float(row["log_loss"])
+    if per_model_best:
+        summary["best_validation_per_model"] = per_model_best
+    if improvements:
+        summary["validation_improvements_vs_core"] = improvements
+
+    backtest_df = results[results["split_name"].str.startswith("backtest")]
+    if not backtest_df.empty:
+        grouped = (
+            backtest_df.groupby(["model_name", "feature_set"])["log_loss"]
+            .mean()
+            .reset_index()
+        )
+        comparisons: Dict[str, Dict[str, Dict[str, float]]] = {}
+        for model_name in grouped["model_name"].unique():
+            model_group = grouped[grouped["model_name"] == model_name]
+            core_row = model_group[model_group["feature_set"] == "core"]
+            if core_row.empty:
+                continue
+            core_loss = float(core_row["log_loss"].iloc[0])
+            for _, row in model_group.iterrows():
+                fs = row["feature_set"]
+                if fs == "core":
+                    continue
+                comparisons.setdefault(model_name, {})[fs] = {
+                    "avg_log_loss": float(row["log_loss"]),
+                    "improvement_vs_core": core_loss - float(row["log_loss"]),
+                }
+        if comparisons:
+            summary["backtest_improvements_vs_core"] = comparisons
+    return summary
+
+
+def _average_metrics(results: pd.DataFrame, group_col: str) -> List[Dict[str, object]]:
+    grouped = (
+        results.groupby(group_col)[["log_loss", "brier_score", "roc_auc", "accuracy"]]
+        .mean()
+        .reset_index()
+    )
+    return grouped.to_dict("records")
+
+
+def _summarize_final_results(results: pd.DataFrame) -> Dict[str, object]:
+    summary: Dict[str, object] = _base_summary_dict()
+    main_df = results[results["split_name"] == "main_validation"]
+    if not main_df.empty:
+        best_row = main_df.loc[main_df["log_loss"].idxmin()]
+        summary["best_model_main_split"] = {
+            "model_name": best_row["model_name"],
+            "feature_set": best_row["feature_set"],
+            "log_loss": float(best_row["log_loss"]),
+            "accuracy": float(best_row["accuracy"]),
+        }
+        summary["best_feature_set_main_split"] = best_row["feature_set"]
+
+    backtest_df = results[results["split_name"].str.startswith("backtest")]
+    if not backtest_df.empty:
+        avg_model = (
+            backtest_df.groupby("model_name")["log_loss"].mean().reset_index()
+        )
+        if not avg_model.empty:
+            best_model = avg_model.loc[avg_model["log_loss"].idxmin()]
+            summary["best_model_backtest_average"] = {
+                "model_name": best_model["model_name"],
+                "avg_log_loss": float(best_model["log_loss"]),
+            }
+        avg_feature = (
+            backtest_df.groupby("feature_set")["log_loss"].mean().reset_index()
+        )
+        if not avg_feature.empty:
+            best_feature = avg_feature.loc[avg_feature["log_loss"].idxmin()]
+            summary["best_feature_set_backtest_average"] = {
+                "feature_set": best_feature["feature_set"],
+                "avg_log_loss": float(best_feature["log_loss"]),
+            }
+
+    summary["average_metrics_per_model"] = _average_metrics(results, "model_name")
+    summary["average_metrics_per_feature_set"] = _average_metrics(results, "feature_set")
+
+    ranking = (
+        results.groupby(["model_name", "feature_set"])[["log_loss", "brier_score", "roc_auc", "accuracy"]]
+        .mean()
+        .reset_index()
+        .sort_values("log_loss")
+    )
+    ranking_records = ranking.to_dict("records")
+    summary["model_ranking"] = ranking_records
+    if ranking_records:
+        summary["recommended_production_configuration"] = ranking_records[0]
     return summary
 
 
@@ -270,9 +444,14 @@ def save_results(
     feature_sets: Sequence[str],
     include_backtests: bool,
     diff_columns: Sequence[str],
+    mode: str,
+    model_names: Sequence[str],
 ) -> None:
     reports_dir = config.paths.outputs_dir / "reports"
-    ensure_parent_dir(reports_dir / "model_comparison.csv")
+    comparison_file, summary_file = MODE_OUTPUT_FILENAMES.get(
+        mode, MODE_OUTPUT_FILENAMES["comparison"]
+    )
+    ensure_parent_dir(reports_dir / comparison_file)
 
     ordered_cols = [
         "split_name",
@@ -292,12 +471,12 @@ def save_results(
         ["split_name", "feature_set", "model_name"]
     ).reset_index(drop=True)
     results.to_csv(
-        reports_dir / "model_comparison.csv",
+        reports_dir / comparison_file,
         columns=ordered_cols,
         index=False,
     )
 
-    summary_path = reports_dir / "model_comparison_summary.json"
+    summary_path = reports_dir / summary_file
     summary_path.write_text(json.dumps(summary, indent=2, default=_json_default))
 
     descriptions = describe_feature_sets()
@@ -316,8 +495,9 @@ def save_results(
     )
 
     experiment_config = {
+        "mode": mode,
         "feature_sets": list(feature_sets),
-        "models": list(MODEL_NAMES),
+        "models": list(model_names),
         "include_backtests": include_backtests,
         "validation_start_season": config.training.validation_start_season,
         "backtest_splits_attempted": BACKTEST_SPLITS if include_backtests else [],
@@ -350,7 +530,13 @@ def parse_args() -> argparse.Namespace:
         "--feature-sets",
         nargs="+",
         choices=available_feature_sets(),
-        help="Feature sets to compare. Defaults to all available.",
+        help="Feature sets to compare. Defaults depend on --mode.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=tuple(MODE_MODEL_MAP.keys()),
+        default="comparison",
+        help="Experiment mode: comparison, ablation, or final.",
     )
     return parser.parse_args()
 
@@ -366,18 +552,34 @@ def main() -> None:
     save_feature_summary_report(diagnostics, feature_summary_path)
     diff_columns = sorted([col for col in dataset.columns if col.startswith("Diff_")])
 
-    feature_sets = args.feature_sets or available_feature_sets()
+    mode = args.mode
+    feature_sets = args.feature_sets or MODE_FEATURE_SET_DEFAULTS.get(
+        mode, MODE_FEATURE_SET_DEFAULTS["comparison"]
+    )
+    model_names = MODE_MODEL_MAP.get(mode, MODE_MODEL_MAP["comparison"])
     include_backtests = not args.skip_backtests
 
+    print(f"Experiment mode: {mode}")
     print(f"Running experiments for feature sets: {', '.join(feature_sets)}")
     if include_backtests:
         print("Rolling backtests: enabled")
     else:
         print("Rolling backtests: skipped")
 
-    results = run_experiments(dataset, diff_columns, config, feature_sets, include_backtests)
-    summary = summarize_results(results)
-    save_results(results, summary, config, feature_sets, include_backtests, diff_columns)
+    results = run_experiments(
+        dataset, diff_columns, config, feature_sets, include_backtests, model_names
+    )
+    summary = summarize_results(results, mode)
+    save_results(
+        results,
+        summary,
+        config,
+        feature_sets,
+        include_backtests,
+        diff_columns,
+        mode,
+        model_names,
+    )
     print("Experiment summary:")
     print(json.dumps(summary, indent=2, default=_json_default))
 

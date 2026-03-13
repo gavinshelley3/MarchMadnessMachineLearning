@@ -93,7 +93,7 @@ def test_summarize_results_builds_conclusions():
         },
     ]
     df = pd.DataFrame(rows)
-    summary = summarize_results(df)
+    summary = summarize_results(df, mode="comparison")
 
     assert summary["best_validation_configuration"]["model"] == "neural_net"
     assert "advanced_vs_core_backtests" in summary

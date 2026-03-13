@@ -8,6 +8,7 @@ from typing import List, Tuple
 import numpy as np
 import pandas as pd
 import torch
+from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from torch import nn
@@ -130,6 +131,25 @@ def run_logistic_regression_baseline(
     if len(np.unique(y_train)) < 2:
         return np.full(len(X_val), float(np.unique(y_train)[0]))
     model = LogisticRegression(max_iter=1000, solver="lbfgs")
+    model.fit(X_train, y_train)
+    return model.predict_proba(X_val)[:, 1]
+
+
+def run_gradient_boosting_baseline(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    random_state: int | None = None,
+) -> np.ndarray:
+    unique = np.unique(y_train)
+    if len(unique) < 2:
+        return np.full(len(X_val), float(unique[0]))
+    model = GradientBoostingClassifier(
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=3,
+        random_state=random_state,
+    )
     model.fit(X_train, y_train)
     return model.predict_proba(X_val)[:, 1]
 
