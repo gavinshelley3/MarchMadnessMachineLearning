@@ -1,0 +1,260 @@
+﻿{
+  "season": 2026,
+  "bracket_type": "projected",
+  "source_note": "Projected 2026 bracket provided via prompt on 2026-03-13. Replace with the official bracket when released.",
+  "updated_at": "2026-03-13T00:00:00Z",
+  "regions": [
+    {
+      "name": "East",
+      "locations": ["Washington DC", "Greenville", "Philadelphia", "St. Louis"],
+      "round_of_64": [
+        {
+          "slot": "E1",
+          "round": "R64",
+          "team1": {"seed": 1, "display_name": "Duke", "team_key": "Duke"},
+          "team2": {"seed": 16, "display_name": "Siena", "team_key": "Siena"}
+        },
+        {
+          "slot": "E8",
+          "round": "R64",
+          "team1": {"seed": 8, "display_name": "Georgia", "team_key": "Georgia"},
+          "team2": {"seed": 9, "display_name": "TCU", "team_key": "TCU"}
+        },
+        {
+          "slot": "E5",
+          "round": "R64",
+          "team1": {"seed": 5, "display_name": "Arkansas", "team_key": "Arkansas"},
+          "team2": {"seed": 12, "display_name": "Yale", "team_key": "Yale"}
+        },
+        {
+          "slot": "E4",
+          "round": "R64",
+          "team1": {"seed": 4, "display_name": "Purdue", "team_key": "Purdue"},
+          "team2": {"seed": 13, "display_name": "Northern Iowa", "team_key": "Northern Iowa"}
+        },
+        {
+          "slot": "E6",
+          "round": "R64",
+          "team1": {"seed": 6, "display_name": "Louisville", "team_key": "Louisville"},
+          "team2": {
+            "seed": 11,
+            "display_name": "Missouri / VCU",
+            "team_key": "Missouri",
+            "options": [
+              {"team_key": "Missouri", "display_name": "Missouri"},
+              {"team_key": "VCU", "display_name": "VCU"}
+            ]
+          }
+        },
+        {
+          "slot": "E3",
+          "round": "R64",
+          "team1": {"seed": 3, "display_name": "Illinois", "team_key": "Illinois"},
+          "team2": {"seed": 14, "display_name": "N Dakota St", "team_key": "N Dakota St"}
+        },
+        {
+          "slot": "E7",
+          "round": "R64",
+          "team1": {"seed": 7, "display_name": "Kentucky", "team_key": "Kentucky"},
+          "team2": {"seed": 10, "display_name": "Santa Clara", "team_key": "Santa Clara"}
+        },
+        {
+          "slot": "E2",
+          "round": "R64",
+          "team1": {"seed": 2, "display_name": "Iowa State", "team_key": "Iowa St"},
+          "team2": {"seed": 15, "display_name": "Tennessee St", "team_key": "Tennessee St"}
+        }
+      ]
+    },
+    {
+      "name": "South",
+      "locations": ["Houston", "Tampa", "San Diego", "Oklahoma City"],
+      "round_of_64": [
+        {
+          "slot": "S1",
+          "round": "R64",
+          "team1": {"seed": 1, "display_name": "Florida", "team_key": "Florida"},
+          "team2": {
+            "seed": 16,
+            "display_name": "Southern / Lehigh",
+            "team_key": "Southern Univ",
+            "options": [
+              {"team_key": "Southern Univ", "display_name": "Southern"},
+              {"team_key": "Lehigh", "display_name": "Lehigh"}
+            ]
+          }
+        },
+        {
+          "slot": "S8",
+          "round": "R64",
+          "team1": {"seed": 8, "display_name": "Ohio State", "team_key": "Ohio St"},
+          "team2": {"seed": 9, "display_name": "Clemson", "team_key": "Clemson"}
+        },
+        {
+          "slot": "S5",
+          "round": "R64",
+          "team1": {"seed": 5, "display_name": "St John's", "team_key": "St John's"},
+          "team2": {"seed": 12, "display_name": "McNeese", "team_key": "McNeese St"}
+        },
+        {
+          "slot": "S4",
+          "round": "R64",
+          "team1": {"seed": 4, "display_name": "Texas Tech", "team_key": "Texas Tech"},
+          "team2": {"seed": 13, "display_name": "Utah Valley", "team_key": "Utah Valley"}
+        },
+        {
+          "slot": "S6",
+          "round": "R64",
+          "team1": {"seed": 6, "display_name": "North Carolina", "team_key": "North Carolina"},
+          "team2": {"seed": 11, "display_name": "South Florida", "team_key": "South Florida"}
+        },
+        {
+          "slot": "S3",
+          "round": "R64",
+          "team1": {"seed": 3, "display_name": "Nebraska", "team_key": "Nebraska"},
+          "team2": {"seed": 14, "display_name": "Wright St", "team_key": "Wright St"}
+        },
+        {
+          "slot": "S7",
+          "round": "R64",
+          "team1": {"seed": 7, "display_name": "Saint Mary's", "team_key": "St Mary's CA"},
+          "team2": {"seed": 10, "display_name": "Saint Louis", "team_key": "St Louis"}
+        },
+        {
+          "slot": "S2",
+          "round": "R64",
+          "team1": {"seed": 2, "display_name": "Houston", "team_key": "Houston"},
+          "team2": {"seed": 15, "display_name": "Furman", "team_key": "Furman"}
+        }
+      ]
+    },
+    {
+      "name": "Midwest",
+      "locations": ["Chicago", "Buffalo", "Portland", "Greenville", "Philadelphia"],
+      "round_of_64": [
+        {
+          "slot": "M1",
+          "round": "R64",
+          "team1": {"seed": 1, "display_name": "Michigan", "team_key": "Michigan"},
+          "team2": {
+            "seed": 16,
+            "display_name": "Howard / Idaho",
+            "team_key": "Howard",
+            "options": [
+              {"team_key": "Howard", "display_name": "Howard"},
+              {"team_key": "Idaho", "display_name": "Idaho"}
+            ]
+          }
+        },
+        {
+          "slot": "M8",
+          "round": "R64",
+          "team1": {"seed": 8, "display_name": "Utah State", "team_key": "Utah St"},
+          "team2": {"seed": 9, "display_name": "Iowa", "team_key": "Iowa"}
+        },
+        {
+          "slot": "M5",
+          "round": "R64",
+          "team1": {"seed": 5, "display_name": "Tennessee", "team_key": "Tennessee"},
+          "team2": {"seed": 12, "display_name": "Akron", "team_key": "Akron"}
+        },
+        {
+          "slot": "M4",
+          "round": "R64",
+          "team1": {"seed": 4, "display_name": "Kansas", "team_key": "Kansas"},
+          "team2": {"seed": 13, "display_name": "Sam Houston", "team_key": "Sam Houston St"}
+        },
+        {
+          "slot": "M6",
+          "round": "R64",
+          "team1": {"seed": 6, "display_name": "Wisconsin", "team_key": "Wisconsin"},
+          "team2": {"seed": 11, "display_name": "Miami OH", "team_key": "Miami OH"}
+        },
+        {
+          "slot": "M3",
+          "round": "R64",
+          "team1": {"seed": 3, "display_name": "Alabama", "team_key": "Alabama"},
+          "team2": {"seed": 14, "display_name": "Troy", "team_key": "Troy"}
+        },
+        {
+          "slot": "M7",
+          "round": "R64",
+          "team1": {"seed": 7, "display_name": "Miami", "team_key": "Miami FL"},
+          "team2": {"seed": 10, "display_name": "UCF", "team_key": "UCF"}
+        },
+        {
+          "slot": "M2",
+          "round": "R64",
+          "team1": {"seed": 2, "display_name": "UConn", "team_key": "Connecticut"},
+          "team2": {"seed": 15, "display_name": "UMBC", "team_key": "UMBC"}
+        }
+      ]
+    },
+    {
+      "name": "West",
+      "locations": ["San Jose", "San Diego", "Tampa", "Portland", "Buffalo"],
+      "round_of_64": [
+        {
+          "slot": "W1",
+          "round": "R64",
+          "team1": {"seed": 1, "display_name": "Arizona", "team_key": "Arizona"},
+          "team2": {"seed": 16, "display_name": "Long Island", "team_key": "LIU Brooklyn"}
+        },
+        {
+          "slot": "W8",
+          "round": "R64",
+          "team1": {"seed": 8, "display_name": "UCLA", "team_key": "UCLA"},
+          "team2": {"seed": 9, "display_name": "Texas A&M", "team_key": "Texas A&M"}
+        },
+        {
+          "slot": "W5",
+          "round": "R64",
+          "team1": {"seed": 5, "display_name": "Vanderbilt", "team_key": "Vanderbilt"},
+          "team2": {"seed": 12, "display_name": "High Point", "team_key": "High Point"}
+        },
+        {
+          "slot": "W4",
+          "round": "R64",
+          "team1": {"seed": 4, "display_name": "Virginia", "team_key": "Virginia"},
+          "team2": {"seed": 13, "display_name": "Hofstra", "team_key": "Hofstra"}
+        },
+        {
+          "slot": "W6",
+          "round": "R64",
+          "team1": {"seed": 6, "display_name": "BYU", "team_key": "BYU"},
+          "team2": {
+            "seed": 11,
+            "display_name": "Texas / SMU",
+            "team_key": "Texas",
+            "options": [
+              {"team_key": "Texas", "display_name": "Texas"},
+              {"team_key": "SMU", "display_name": "SMU"}
+            ]
+          }
+        },
+        {
+          "slot": "W3",
+          "round": "R64",
+          "team1": {"seed": 3, "display_name": "Gonzaga", "team_key": "Gonzaga"},
+          "team2": {"seed": 14, "display_name": "UC Irvine", "team_key": "UC Irvine"}
+        },
+        {
+          "slot": "W7",
+          "round": "R64",
+          "team1": {"seed": 7, "display_name": "Villanova", "team_key": "Villanova"},
+          "team2": {"seed": 10, "display_name": "NC State", "team_key": "NC State"}
+        },
+        {
+          "slot": "W2",
+          "round": "R64",
+          "team1": {"seed": 2, "display_name": "Michigan St", "team_key": "Michigan St"},
+          "team2": {"seed": 15, "display_name": "Queens", "team_key": "Queens NC"}
+        }
+      ]
+    }
+  ],
+  "final_four_pairings": [
+    {"name": "Semifinal 1", "regions": ["East", "West"]},
+    {"name": "Semifinal 2", "regions": ["South", "Midwest"]}
+  ]
+}
