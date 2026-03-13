@@ -25,63 +25,101 @@ CORE_FEATURE_COLUMNS: List[str] = [
     "MasseyOrdinal",
 ]
 
-ADVANCED_FEATURE_GROUPS: Dict[str, List[str]] = {
-    "shooting_efficiency": [
-        "EffectiveFGPercent",
-        "TrueShootingPercent",
-        "ThreePointRate",
-        "FreeThrowRate",
-    ],
-    "possession_ratings": [
-        "OffensiveRating",
-        "DefensiveRating",
-        "NetRating",
-    ],
-    "rebound_turnover_margins": [
-        "ReboundMargin",
-        "OffensiveReboundRate",
-        "TurnoverMargin",
-        "AssistRate",
-    ],
-    "adjusted_margin": [
-        "AdjustedScoringMargin",
-    ],
-    "recent_form_5": [
-        "Recent5WinPct",
-        "Recent5ScoringMargin",
-        "Recent5OffRating",
-        "Recent5DefRating",
-        "Recent5EffectiveFG",
-    ],
-    "recent_form_10": [
-        "Recent10WinPct",
-        "Recent10ScoringMargin",
-        "Recent10OffRating",
-        "Recent10DefRating",
-        "Recent10EffectiveFG",
-    ],
-    "neutral_site": [
-        "NeutralWinPercentage",
-        "NeutralScoringMargin",
-    ],
-}
-
-ADVANCED_FEATURE_COLUMNS: List[str] = [
-    column for columns in ADVANCED_FEATURE_GROUPS.values() for column in columns
+EFFICIENCY_FEATURES: List[str] = [
+    "EffectiveFGPercent",
+    "TrueShootingPercent",
+    "ThreePointRate",
+    "FreeThrowRate",
 ]
 
-FEATURE_GROUPS: Dict[str, List[str]] = {"core": CORE_FEATURE_COLUMNS}
-FEATURE_GROUPS.update({f"advanced_{name}": cols for name, cols in ADVANCED_FEATURE_GROUPS.items()})
+POSSESSION_RATING_FEATURES: List[str] = [
+    "OffensiveRating",
+    "DefensiveRating",
+    "NetRating",
+]
+
+REBOUND_TURNOVER_FEATURES: List[str] = [
+    "ReboundMargin",
+    "OffensiveReboundRate",
+    "TurnoverMargin",
+    "AssistRate",
+]
+
+RECENT_FORM_FEATURES: List[str] = [
+    "Recent5WinPct",
+    "Recent5ScoringMargin",
+    "Recent5OffRating",
+    "Recent5DefRating",
+    "Recent5EffectiveFG",
+    "Recent10WinPct",
+    "Recent10ScoringMargin",
+    "Recent10OffRating",
+    "Recent10DefRating",
+    "Recent10EffectiveFG",
+]
+
+OPPONENT_ADJUSTMENT_FEATURES: List[str] = [
+    "AdjustedScoringMargin",
+]
+
+NEUTRAL_CONTEXT_FEATURES: List[str] = [
+    "NeutralWinPercentage",
+    "NeutralScoringMargin",
+]
+
+FEATURE_GROUPS: Dict[str, List[str]] = {
+    "core": CORE_FEATURE_COLUMNS,
+    "efficiency": EFFICIENCY_FEATURES,
+    "possession_ratings": POSSESSION_RATING_FEATURES,
+    "rebound_turnover": REBOUND_TURNOVER_FEATURES,
+    "recent_form": RECENT_FORM_FEATURES,
+    "opponent_adjustment": OPPONENT_ADJUSTMENT_FEATURES,
+    "neutral_context": NEUTRAL_CONTEXT_FEATURES,
+}
+
+ADVANCED_GROUP_NAMES: List[str] = [name for name in FEATURE_GROUPS if name != "core"]
+
+ADVANCED_FEATURE_COLUMNS: List[str] = [
+    column for name in ADVANCED_GROUP_NAMES for column in FEATURE_GROUPS[name]
+]
+
+def _all_groups_except_core() -> List[str]:
+    return ["core"] + ADVANCED_GROUP_NAMES
+
 
 FEATURE_SET_DEFINITIONS: Dict[str, List[str]] = {
     "core": ["core"],
-    "advanced": list(FEATURE_GROUPS.keys()),
+    "core_plus_efficiency": ["core", "efficiency"],
+    "core_plus_possession_ratings": ["core", "possession_ratings"],
+    "core_plus_recent_form": ["core", "recent_form"],
+    "core_plus_opponent_adjustment": ["core", "opponent_adjustment"],
+    "core_plus_neutral_context": ["core", "neutral_context"],
+    "core_plus_rebound_turnover": ["core", "rebound_turnover"],
+    "core_plus_all_advanced": _all_groups_except_core(),
+    "advanced": _all_groups_except_core(),
 }
 
 FEATURE_SET_DESCRIPTIONS: Dict[str, str] = {
     "core": "Seed/context features plus historical per-team season averages.",
-    "advanced": "Core features plus efficiency, possession-based ratings, recent form, opponent adjustments, and neutral-site stats.",
+    "core_plus_efficiency": "Core + shooting/true-shooting efficiency rates.",
+    "core_plus_possession_ratings": "Core + offensive/defensive/net ratings derived from possessions.",
+    "core_plus_recent_form": "Core + 5- and 10-game momentum metrics.",
+    "core_plus_opponent_adjustment": "Core + opponent-adjusted scoring margin.",
+    "core_plus_neutral_context": "Core + neutral-site win rate/margin.",
+    "core_plus_rebound_turnover": "Core + rebound/turnover margin features.",
+    "core_plus_all_advanced": "Core + every advanced feature group currently available.",
+    "advanced": "Core features plus the entire advanced bundle.",
 }
+
+ABLATION_DEFAULT_SETS: List[str] = [
+    "core",
+    "core_plus_efficiency",
+    "core_plus_possession_ratings",
+    "core_plus_recent_form",
+    "core_plus_opponent_adjustment",
+    "core_plus_neutral_context",
+    "core_plus_all_advanced",
+]
 
 FEATURE_TO_GROUP: Dict[str, str] = {}
 for group_name, columns in FEATURE_GROUPS.items():
@@ -91,6 +129,15 @@ for group_name, columns in FEATURE_GROUPS.items():
 
 def available_feature_sets() -> List[str]:
     return list(FEATURE_SET_DEFINITIONS.keys())
+
+
+def default_ablation_feature_sets() -> List[str]:
+    return [name for name in ABLATION_DEFAULT_SETS if name in FEATURE_SET_DEFINITIONS]
+
+
+def default_comparison_feature_sets() -> List[str]:
+    preferred = ["core", "advanced"]
+    return [name for name in preferred if name in FEATURE_SET_DEFINITIONS]
 
 
 def feature_group_for_column(column: str) -> str:

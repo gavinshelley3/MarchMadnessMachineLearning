@@ -14,6 +14,8 @@ from .data_pipeline import load_and_build_dataset, save_feature_summary_report
 from .evaluate import compute_metrics
 from .feature_metadata import (
     available_feature_sets,
+    default_ablation_feature_sets,
+    default_comparison_feature_sets,
     describe_feature_sets,
     select_diff_columns,
 )
@@ -32,9 +34,13 @@ BACKTEST_SPLITS = [
     (2018, 2019),
     (2020, 2021),
 ]
-MODEL_NAMES: Sequence[str] = ("seed_baseline", "logistic_regression", "neural_net")
-MODEL_SEED_OFFSETS = {"seed_baseline": 0, "logistic_regression": 1, "neural_net": 2}
-FEATURE_SET_OFFSETS = {"core": 0, "advanced": 10}
+DEFAULT_MODEL_NAMES: Sequence[str] = ("seed_baseline", "logistic_regression", "neural_net")
+ABLATION_MODEL_NAMES: Sequence[str] = ("logistic_regression", "neural_net")
+MODEL_SEED_OFFSETS = {"logistic_regression": 1, "neural_net": 2}
+FEATURE_SET_OFFSETS = {name: idx * 10 for idx, name in enumerate(sorted(available_feature_sets()))}
+MODE_CHOICES = ("comparison", "ablation")
+DEFAULT_OUTPUT_PREFIX = "model"
+ABLATION_OUTPUT_PREFIX = "ablation"
 
 
 @dataclass
@@ -92,8 +98,14 @@ def build_splits(
     return splits
 
 
+def _feature_set_offset(feature_set: str) -> int:
+    if feature_set not in FEATURE_SET_OFFSETS:
+        FEATURE_SET_OFFSETS[feature_set] = (len(FEATURE_SET_OFFSETS) + 1) * 10
+    return FEATURE_SET_OFFSETS[feature_set]
+
+
 def _seed_for_variant(base_seed: int, split_index: int, feature_set: str, model_name: str) -> int:
-    feature_offset = FEATURE_SET_OFFSETS.get(feature_set, 0)
+    feature_offset = _feature_set_offset(feature_set)
     model_offset = MODEL_SEED_OFFSETS.get(model_name, 0)
     return base_seed + split_index * 100 + feature_offset + model_offset
 
@@ -128,47 +140,61 @@ def run_experiments(
     config,
     feature_sets: Sequence[str],
     include_backtests: bool,
+    model_names: Sequence[str],
+    skip_empty_feature_sets: bool = False,
 ) -> pd.DataFrame:
     splits = build_splits(dataset, config.training.validation_start_season, include_backtests)
     results: List[Dict[str, object]] = []
+    active_models = set(model_names)
+    include_seed = "seed_baseline" in active_models
+    include_logistic = "logistic_regression" in active_models
+    include_nn = "neural_net" in active_models
 
     for split_index, split in enumerate(splits):
         for feature_set in feature_sets:
             selected_cols = select_diff_columns(diff_columns, feature_set)
             if not selected_cols:
-                raise ValueError(f"No diff columns available for feature set '{feature_set}'.")
+                message = f"No diff columns available for feature set '{feature_set}'. Feature set skipped."
+                print(message)
+                if skip_empty_feature_sets:
+                    continue
+                raise ValueError(message)
             X_train, y_train, X_val, y_val, feature_cols, _ = prepare_features(
                 split.train_df, split.val_df, selected_cols
             )
 
-            # Seed baseline (independent of feature set but we report per set for completeness)
-            seed_probs = run_seed_baseline(split.val_df)
-            seed_metrics, _ = compute_metrics(y_val, seed_probs)
-            seed_row = _base_result_row(split, feature_set, "seed_baseline", 1)
-            seed_row.update(_format_metrics(seed_metrics))
-            results.append(seed_row)
+            if include_seed:
+                seed_probs = run_seed_baseline(split.val_df)
+                seed_metrics, _ = compute_metrics(y_val, seed_probs)
+                seed_row = _base_result_row(split, feature_set, "seed_baseline", 1)
+                seed_row.update(_format_metrics(seed_metrics))
+                results.append(seed_row)
 
-            # Logistic regression
-            set_random_seed(_seed_for_variant(config.training.random_seed, split_index, feature_set, "logistic_regression"))
-            logit_probs = run_logistic_regression_baseline(X_train, y_train, X_val)
-            logit_metrics, _ = compute_metrics(y_val, logit_probs)
-            logistic_row = _base_result_row(split, feature_set, "logistic_regression", len(feature_cols))
-            logistic_row.update(_format_metrics(logit_metrics))
-            results.append(logistic_row)
+            if include_logistic:
+                set_random_seed(
+                    _seed_for_variant(config.training.random_seed, split_index, feature_set, "logistic_regression")
+                )
+                logit_probs = run_logistic_regression_baseline(X_train, y_train, X_val)
+                logit_metrics, _ = compute_metrics(y_val, logit_probs)
+                logistic_row = _base_result_row(split, feature_set, "logistic_regression", len(feature_cols))
+                logistic_row.update(_format_metrics(logit_metrics))
+                results.append(logistic_row)
 
-            # Neural network
-            set_random_seed(_seed_for_variant(config.training.random_seed, split_index, feature_set, "neural_net"))
-            _, nn_metrics, _, _ = train_with_arrays(
-                X_train, y_train, X_val, y_val, config
-            )
-            nn_row = _base_result_row(split, feature_set, "neural_net", len(feature_cols))
-            nn_row.update(_format_metrics(nn_metrics))
-            results.append(nn_row)
+            if include_nn:
+                set_random_seed(
+                    _seed_for_variant(config.training.random_seed, split_index, feature_set, "neural_net")
+                )
+                _, nn_metrics, _, _ = train_with_arrays(
+                    X_train, y_train, X_val, y_val, config
+                )
+                nn_row = _base_result_row(split, feature_set, "neural_net", len(feature_cols))
+                nn_row.update(_format_metrics(nn_metrics))
+                results.append(nn_row)
 
     return pd.DataFrame(results)
 
 
-def summarize_results(results: pd.DataFrame) -> Dict[str, object]:
+def summarize_comparison_results(results: pd.DataFrame) -> Dict[str, object]:
     if results.empty:
         return {"message": "No experiment results generated."}
 
@@ -263,6 +289,126 @@ def summarize_results(results: pd.DataFrame) -> Dict[str, object]:
     return summary
 
 
+def summarize_ablation_results(
+    results: pd.DataFrame, baseline_feature_set: str = "core"
+) -> Dict[str, object]:
+    if results.empty:
+        return {"message": "No ablation results generated.", "baseline_feature_set": baseline_feature_set}
+
+    summary: Dict[str, object] = {"baseline_feature_set": baseline_feature_set}
+    models = sorted(results["model_name"].unique())
+    main_summary: Dict[str, Dict[str, float]] = {}
+    backtest_summary: Dict[str, Dict[str, float]] = {}
+    improvements_vs_core: Dict[str, Dict[str, Dict[str, float]]] = {}
+    recommendations: Dict[str, Dict[str, str]] = {}
+    harmful_feature_sets: Dict[str, List[str]] = {}
+    notes: List[str] = []
+
+    backtest_df = results[results["split_name"].str.startswith("backtest")]
+
+    for model in models:
+        model_rows = results[results["model_name"] == model]
+        model_main = model_rows[model_rows["split_name"] == "main_validation"]
+        model_backtests = backtest_df[backtest_df["model_name"] == model]
+        recommendations[model] = {}
+
+        baseline_main_loss = None
+        if not model_main.empty:
+            baseline_row = model_main[model_main["feature_set"] == baseline_feature_set]
+            if not baseline_row.empty:
+                baseline_main_loss = float(baseline_row["log_loss"].iloc[0])
+            best = model_main.loc[model_main["log_loss"].idxmin()]
+            main_summary[model] = {
+                "feature_set": best["feature_set"],
+                "log_loss": float(best["log_loss"]),
+                "accuracy": float(best["accuracy"]),
+            }
+            recommendations[model]["main_validation"] = best["feature_set"]
+
+            model_improvements = {}
+            if baseline_main_loss is not None:
+                for _, row in model_main.iterrows():
+                    model_improvements[row["feature_set"]] = baseline_main_loss - float(row["log_loss"])
+            improvements_vs_core.setdefault(model, {})["main_validation"] = model_improvements
+
+            best_addition = max(
+                ((fs, delta) for fs, delta in model_improvements.items() if fs != baseline_feature_set),
+                key=lambda item: item[1],
+                default=None,
+            )
+            if best_addition:
+                notes.append(
+                    f"{model}: best main-split addition vs core is {best_addition[0]} "
+                    f"(Δlog_loss={best_addition[1]:+.4f})."
+                )
+                recommendations[model]["suggested_trimmed_set"] = best_addition[0]
+        else:
+            main_summary[model] = {}
+
+        if not model_backtests.empty:
+            grouped = (
+                model_backtests.groupby("feature_set")["log_loss"]
+                .mean()
+                .reset_index()
+            )
+            best_bt = grouped.loc[grouped["log_loss"].idxmin()]
+            backtest_summary[model] = {
+                "feature_set": best_bt["feature_set"],
+                "avg_log_loss": float(best_bt["log_loss"]),
+            }
+            recommendations[model]["backtests"] = best_bt["feature_set"]
+
+            baseline_bt_row = grouped[grouped["feature_set"] == baseline_feature_set]
+            baseline_bt = float(baseline_bt_row["log_loss"].iloc[0]) if not baseline_bt_row.empty else None
+            bt_improvements = {}
+            if baseline_bt is not None:
+                for _, row in grouped.iterrows():
+                    bt_improvements[row["feature_set"]] = baseline_bt - float(row["log_loss"])
+            improvements_vs_core.setdefault(model, {})["backtests"] = bt_improvements
+
+            harm_list: List[str] = []
+            for feature_set, bt_delta in bt_improvements.items():
+                main_delta = improvements_vs_core.get(model, {}).get("main_validation", {}).get(feature_set)
+                if main_delta is not None and bt_delta < 0 and main_delta < 0:
+                    harm_list.append(feature_set)
+            if harm_list:
+                harmful_feature_sets[model] = harm_list
+        else:
+            backtest_summary[model] = {}
+
+        if "suggested_trimmed_set" not in recommendations[model]:
+            recommendations[model]["suggested_trimmed_set"] = baseline_feature_set
+
+    summary["main_validation"] = main_summary
+    summary["backtests"] = backtest_summary
+    summary["improvements_vs_core"] = improvements_vs_core
+    summary["recommendations"] = recommendations
+    if harmful_feature_sets:
+        summary["consistently_harmful_feature_sets"] = harmful_feature_sets
+
+    all_adv_rows = results[results["feature_set"] == "core_plus_all_advanced"]
+    for model in models:
+        adv_main = all_adv_rows[
+            (all_adv_rows["model_name"] == model) & (all_adv_rows["split_name"] == "main_validation")
+        ]
+        core_main = results[
+            (results["feature_set"] == baseline_feature_set)
+            & (results["model_name"] == model)
+            & (results["split_name"] == "main_validation")
+        ]
+        if not adv_main.empty and not core_main.empty:
+            delta = float(core_main["log_loss"].iloc[0]) - float(adv_main["log_loss"].iloc[0])
+            summary.setdefault("core_plus_all_advanced_effect", {})[model] = {"main_validation_delta": delta}
+            notes.append(
+                f"{model}: core_plus_all_advanced changes main log loss by {delta:+.4f} vs core."
+            )
+
+    if notes:
+        summary["notes"] = notes
+
+    return summary
+
+
 def save_results(
     results: pd.DataFrame,
     summary: Dict[str, object],
@@ -270,9 +416,12 @@ def save_results(
     feature_sets: Sequence[str],
     include_backtests: bool,
     diff_columns: Sequence[str],
+    model_names: Sequence[str],
+    output_prefix: str = DEFAULT_OUTPUT_PREFIX,
 ) -> None:
     reports_dir = config.paths.outputs_dir / "reports"
-    ensure_parent_dir(reports_dir / "model_comparison.csv")
+    base_path = reports_dir / f"{output_prefix}_comparison.csv"
+    ensure_parent_dir(base_path)
 
     ordered_cols = [
         "split_name",
@@ -291,13 +440,9 @@ def save_results(
     results = results.sort_values(
         ["split_name", "feature_set", "model_name"]
     ).reset_index(drop=True)
-    results.to_csv(
-        reports_dir / "model_comparison.csv",
-        columns=ordered_cols,
-        index=False,
-    )
+    results.to_csv(base_path, columns=ordered_cols, index=False)
 
-    summary_path = reports_dir / "model_comparison_summary.json"
+    summary_path = reports_dir / f"{output_prefix}_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, default=_json_default))
 
     descriptions = describe_feature_sets()
@@ -311,18 +456,18 @@ def save_results(
             "description": descriptions.get(name, ""),
             "diff_feature_count": count,
         }
-    (reports_dir / "feature_set_summary.json").write_text(
+    (reports_dir / f"{output_prefix}_feature_set_summary.json").write_text(
         json.dumps(feature_set_summary, indent=2, default=_json_default)
     )
 
     experiment_config = {
         "feature_sets": list(feature_sets),
-        "models": list(MODEL_NAMES),
+        "models": list(model_names),
         "include_backtests": include_backtests,
         "validation_start_season": config.training.validation_start_season,
         "backtest_splits_attempted": BACKTEST_SPLITS if include_backtests else [],
     }
-    (reports_dir / "experiment_config.json").write_text(
+    (reports_dir / f"{output_prefix}_config.json").write_text(
         json.dumps(experiment_config, indent=2, default=_json_default)
     )
 
@@ -352,6 +497,12 @@ def parse_args() -> argparse.Namespace:
         choices=available_feature_sets(),
         help="Feature sets to compare. Defaults to all available.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=MODE_CHOICES,
+        default="comparison",
+        help="Select 'comparison' for the standard model comparison or 'ablation' for feature pruning studies.",
+    )
     return parser.parse_args()
 
 
@@ -366,18 +517,49 @@ def main() -> None:
     save_feature_summary_report(diagnostics, feature_summary_path)
     diff_columns = sorted([col for col in dataset.columns if col.startswith("Diff_")])
 
-    feature_sets = args.feature_sets or available_feature_sets()
     include_backtests = not args.skip_backtests
+    mode = args.mode
 
-    print(f"Running experiments for feature sets: {', '.join(feature_sets)}")
+    if mode == "ablation":
+        feature_sets = args.feature_sets or default_ablation_feature_sets()
+        model_names = ABLATION_MODEL_NAMES
+        skip_empty = True
+        output_prefix = ABLATION_OUTPUT_PREFIX
+        summary_func = summarize_ablation_results
+    else:
+        feature_sets = args.feature_sets or default_comparison_feature_sets()
+        model_names = DEFAULT_MODEL_NAMES
+        skip_empty = False
+        output_prefix = DEFAULT_OUTPUT_PREFIX
+        summary_func = summarize_comparison_results
+
+    print(f"[Mode: {mode}] Running experiments for feature sets: {', '.join(feature_sets)}")
+    print(f"Models: {', '.join(model_names)}")
     if include_backtests:
         print("Rolling backtests: enabled")
     else:
         print("Rolling backtests: skipped")
 
-    results = run_experiments(dataset, diff_columns, config, feature_sets, include_backtests)
-    summary = summarize_results(results)
-    save_results(results, summary, config, feature_sets, include_backtests, diff_columns)
+    results = run_experiments(
+        dataset,
+        diff_columns,
+        config,
+        feature_sets,
+        include_backtests,
+        model_names,
+        skip_empty_feature_sets=skip_empty,
+    )
+    summary = summary_func(results)
+    save_results(
+        results,
+        summary,
+        config,
+        feature_sets,
+        include_backtests,
+        diff_columns,
+        model_names,
+        output_prefix,
+    )
     print("Experiment summary:")
     print(json.dumps(summary, indent=2, default=_json_default))
 
