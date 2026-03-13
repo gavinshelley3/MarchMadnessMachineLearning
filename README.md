@@ -212,6 +212,34 @@ python -m src.experiments \
 
 Set `--skip-backtests` if runtime becomes excessive. All supplemental signals remain optional—if the directory is empty, the pipeline logs a warning and falls back to the base March Madness features.
 
+## Current-Season Enrichment with CBBpy
+
+[CBBpy](https://pypi.org/project/cbbpy/) provides an ESPN scraper for men’s college basketball. It is already listed in `requirements.txt`, so `pip install -r requirements.txt` installs it automatically. This repo only uses the **men’s** scraper and never touches `cbbpy.womens_scraper`.
+
+1. Fetch and cache boxscores for the desired portion of the current season (defaults to November 1 → today when omitted):
+   ```bash
+   python -m src.cbbpy_enrichment \
+     --season 2026 \
+     --start-date 2026-03-01 \
+     --end-date 2026-03-01
+   ```
+   - Raw boxscores are saved under `data/current_season/cbbpy/` so repeated runs reuse the cache.
+   - Team-level feature tables land in `data/current_season/cbbpy/cbbpy_team_features_<season>.csv`.
+   - Diagnostics (games scraped, teams matched, unmatched aliases, cache hits) are written to `outputs/reports/cbbpy_fetch_summary.json`.
+2. Use the cached features inside the existing pipeline when desired:
+   - Dataset diagnostics / experiments / training:
+     ```bash
+     python -m src.dataset_diagnostics \
+       --data-dir data/raw \
+       --include-cbbpy-current \
+       --cbbpy-season 2026 \
+       --cbbpy-features data/current_season/cbbpy/cbbpy_team_features_2026.csv
+     ```
+   - Experiments: add `--include-cbbpy-current` (and optionally `--feature-sets core core_plus_cbbpy_current`) to compare the production configuration against the CBBpy-augmented set.
+   - Training: pass `--include-cbbpy-current` to inject the cached features into the modeling dataset before fitting.
+
+The enrichment remains optional—the model still runs if the CBBpy cache is absent, and the optional feature group can be toggled via `--include-cbbpy-current`. Women’s data is intentionally excluded and any ambiguous team names are logged under `outputs/reports/cbbpy_fetch_summary.json` for review.
+
 ## Testing & CI
 
 Run the test suite locally with:

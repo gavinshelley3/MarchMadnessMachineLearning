@@ -51,12 +51,18 @@ def build_datasets(
     include_supplemental_kaggle: bool = False,
     supplemental_dir: Optional[Path] = None,
     reports_dir: Optional[Path] = None,
+    include_cbbpy_current: bool = False,
+    cbbpy_features_path: Optional[Path] = None,
+    cbbpy_season: Optional[int] = None,
 ):
     dataset, diagnostics = load_and_build_dataset(
         data_dir,
         include_supplemental_kaggle=include_supplemental_kaggle,
         supplemental_dir=supplemental_dir,
         reports_dir=reports_dir,
+        include_cbbpy_current=include_cbbpy_current,
+        cbbpy_features_path=cbbpy_features_path,
+        cbbpy_season=cbbpy_season,
     )
     return dataset, diagnostics
 
@@ -368,6 +374,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Include supplemental Kaggle NCAA Basketball features if available.",
     )
+    parser.add_argument(
+        "--include-cbbpy-current",
+        action="store_true",
+        help="Include cached current-season CBBpy features if available.",
+    )
+    parser.add_argument(
+        "--cbbpy-season",
+        type=int,
+        default=None,
+        help="Season (e.g., 2026) to load from the cached CBBpy features.",
+    )
+    parser.add_argument(
+        "--cbbpy-features",
+        type=Path,
+        default=None,
+        help="Explicit path to a cached CBBpy team-features CSV.",
+    )
     return parser.parse_args()
 
 
@@ -383,6 +406,9 @@ def main() -> None:
         include_supplemental_kaggle=args.include_supplemental_kaggle,
         supplemental_dir=config.paths.supplemental_ncaa_dir,
         reports_dir=config.paths.outputs_dir / "reports",
+        include_cbbpy_current=args.include_cbbpy_current,
+        cbbpy_features_path=args.cbbpy_features,
+        cbbpy_season=args.cbbpy_season,
     )
     log_dataset_diagnostics(diagnostics)
     processed_path = config.paths.processed_data_dir / "matchup_dataset.csv"

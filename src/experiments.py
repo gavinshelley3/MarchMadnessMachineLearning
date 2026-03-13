@@ -42,6 +42,7 @@ MODE_CHOICES = ("comparison", "ablation")
 DEFAULT_OUTPUT_PREFIX = "model"
 ABLATION_OUTPUT_PREFIX = "ablation"
 SUPPLEMENTAL_FEATURE_SET_NAME = "core_plus_supplemental_ncaa"
+CBBPY_FEATURE_SET_NAME = "core_plus_cbbpy_current"
 
 
 @dataclass
@@ -515,6 +516,23 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override supplemental NCAA Basketball directory.",
     )
+    parser.add_argument(
+        "--include-cbbpy-current",
+        action="store_true",
+        help="Include cached current-season CBBpy features if available.",
+    )
+    parser.add_argument(
+        "--cbbpy-season",
+        type=int,
+        default=None,
+        help="Season to load from the cached CBBpy features (e.g., 2026).",
+    )
+    parser.add_argument(
+        "--cbbpy-features",
+        type=Path,
+        default=None,
+        help="Explicit path to a cached CBBpy team-features CSV.",
+    )
     return parser.parse_args()
 
 
@@ -524,9 +542,9 @@ def _default_feature_sets_for_mode(mode: str) -> List[str]:
     return default_comparison_feature_sets()
 
 
-def _merge_supplemental_feature_set(feature_sets: List[str]) -> List[str]:
-    if SUPPLEMENTAL_FEATURE_SET_NAME in available_feature_sets() and SUPPLEMENTAL_FEATURE_SET_NAME not in feature_sets:
-        return feature_sets + [SUPPLEMENTAL_FEATURE_SET_NAME]
+def _ensure_feature_set(feature_sets: List[str], name: str) -> List[str]:
+    if name in available_feature_sets() and name not in feature_sets:
+        return feature_sets + [name]
     return feature_sets
 
 
@@ -543,6 +561,9 @@ def main() -> None:
         include_supplemental_kaggle=args.include_supplemental_kaggle,
         supplemental_dir=supplemental_dir,
         reports_dir=config.paths.outputs_dir / "reports",
+        include_cbbpy_current=args.include_cbbpy_current,
+        cbbpy_features_path=args.cbbpy_features,
+        cbbpy_season=args.cbbpy_season,
     )
     feature_summary_path = config.paths.outputs_dir / "reports" / "feature_summary.json"
     save_feature_summary_report(diagnostics, feature_summary_path)
@@ -556,7 +577,9 @@ def main() -> None:
     else:
         feature_sets = _default_feature_sets_for_mode(mode)
         if args.include_supplemental_kaggle:
-            feature_sets = _merge_supplemental_feature_set(feature_sets)
+            feature_sets = _ensure_feature_set(feature_sets, SUPPLEMENTAL_FEATURE_SET_NAME)
+        if args.include_cbbpy_current:
+            feature_sets = _ensure_feature_set(feature_sets, CBBPY_FEATURE_SET_NAME)
 
     if mode == "ablation":
         model_names = ABLATION_MODEL_NAMES

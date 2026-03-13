@@ -3,7 +3,9 @@ import pandas as pd
 from src.experiments import (
     summarize_comparison_results,
     _default_feature_sets_for_mode,
-    _merge_supplemental_feature_set,
+    _ensure_feature_set,
+    SUPPLEMENTAL_FEATURE_SET_NAME,
+    CBBPY_FEATURE_SET_NAME,
 )
 from src.feature_metadata import select_diff_columns
 
@@ -105,11 +107,16 @@ def test_summarize_results_builds_conclusions():
     assert "conclusions" in summary and summary["conclusions"]
 
 
-def test_default_feature_sets_include_supplemental_when_requested():
+def test_optional_feature_set_helper_adds_sets_once():
     base_sets = _default_feature_sets_for_mode("comparison")
-    augmented = _merge_supplemental_feature_set(base_sets)
-    if base_sets == augmented:
-        # In case supplemental set is already present, ensure no duplicates.
-        assert len(augmented) == len(base_sets)
+    augmented = _ensure_feature_set(base_sets, SUPPLEMENTAL_FEATURE_SET_NAME)
+    if SUPPLEMENTAL_FEATURE_SET_NAME in base_sets:
+        assert augmented == base_sets
     else:
-        assert "core_plus_supplemental_ncaa" in augmented
+        assert augmented[-1] == SUPPLEMENTAL_FEATURE_SET_NAME
+
+    augmented_again = _ensure_feature_set(augmented, CBBPY_FEATURE_SET_NAME)
+    if CBBPY_FEATURE_SET_NAME in augmented:
+        assert augmented_again == augmented
+    else:
+        assert augmented_again[-1] == CBBPY_FEATURE_SET_NAME

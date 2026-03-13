@@ -26,6 +26,7 @@ def prepare_team_context(
     seeds: pd.DataFrame,
     massey_summary: Optional[pd.DataFrame] = None,
     supplemental_features: Optional[pd.DataFrame] = None,
+    cbbpy_features: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     team_features = build_team_season_features(regular_season_detailed)
     seed_features = seeds.copy()
@@ -42,6 +43,10 @@ def prepare_team_context(
     if supplemental_features is not None and not supplemental_features.empty:
         context = context.merge(
             supplemental_features, on=["Season", "TeamID"], how="left"
+        )
+    if cbbpy_features is not None and not cbbpy_features.empty:
+        context = context.merge(
+            cbbpy_features, on=["Season", "TeamID"], how="left"
         )
     return context
 
@@ -105,6 +110,7 @@ def build_matchup_dataset(
     massey_ordinals: Optional[pd.DataFrame] = None,
     massey_system: str | None = None,
     supplemental_features: Optional[pd.DataFrame] = None,
+    cbbpy_features: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     massey_summary = (
         summarize_massey_ordinals(massey_ordinals, massey_system)
@@ -116,6 +122,7 @@ def build_matchup_dataset(
         seeds,
         massey_summary,
         supplemental_features=supplemental_features,
+        cbbpy_features=cbbpy_features,
     )
     numeric_features = [
         col

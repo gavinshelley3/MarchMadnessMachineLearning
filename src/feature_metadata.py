@@ -75,6 +75,18 @@ SUPPLEMENTAL_NCAA_FEATURES: List[str] = [
     "SuppEffectiveFgDiff",
 ]
 
+CBBPY_CURRENT_FEATURES: List[str] = [
+    "CBBpy_GamesPlayed",
+    "CBBpy_WinPct",
+    "CBBpy_PointsForPerGame",
+    "CBBpy_PointsAgainstPerGame",
+    "CBBpy_ScoringMargin",
+    "CBBpy_PossessionsPerGame",
+    "CBBpy_OffRating",
+    "CBBpy_DefRating",
+    "CBBpy_NetRating",
+]
+
 FEATURE_GROUPS: Dict[str, List[str]] = {
     "core": CORE_FEATURE_COLUMNS,
     "efficiency": EFFICIENCY_FEATURES,
@@ -84,6 +96,7 @@ FEATURE_GROUPS: Dict[str, List[str]] = {
     "opponent_adjustment": OPPONENT_ADJUSTMENT_FEATURES,
     "neutral_context": NEUTRAL_CONTEXT_FEATURES,
     "supplemental_ncaa": SUPPLEMENTAL_NCAA_FEATURES,
+    "cbbpy_current": CBBPY_CURRENT_FEATURES,
 }
 
 ADVANCED_GROUP_NAMES: List[str] = [name for name in FEATURE_GROUPS if name != "core"]
@@ -105,6 +118,7 @@ FEATURE_SET_DEFINITIONS: Dict[str, List[str]] = {
     "core_plus_neutral_context": ["core", "neutral_context"],
     "core_plus_rebound_turnover": ["core", "rebound_turnover"],
     "core_plus_supplemental_ncaa": ["core", "supplemental_ncaa"],
+    "core_plus_cbbpy_current": ["core", "cbbpy_current"],
     "core_plus_all_advanced": _all_groups_except_core(),
     "advanced": _all_groups_except_core(),
 }
@@ -118,6 +132,7 @@ FEATURE_SET_DESCRIPTIONS: Dict[str, str] = {
     "core_plus_neutral_context": "Core + neutral-site win rate/margin.",
     "core_plus_rebound_turnover": "Core + rebound/turnover margin features.",
     "core_plus_supplemental_ncaa": "Core + NCAA Basketball supplemental tempo/efficiency metrics.",
+    "core_plus_cbbpy_current": "Core + current-season CBBpy enrichment features (boxscore-derived).",
     "core_plus_all_advanced": "Core + every advanced feature group currently available.",
     "advanced": "Core features plus the entire advanced bundle.",
 }
