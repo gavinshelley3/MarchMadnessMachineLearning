@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .config import get_config
+from .data_inventory import write_local_dataset_inventory
 from .data_pipeline import load_and_build_dataset, save_feature_summary_report
 from .utils import ensure_parent_dir
 
@@ -35,12 +36,28 @@ def main() -> None:
         default=None,
         help="Optional path to save the modeling dataset CSV.",
     )
+    parser.add_argument(
+        "--include-supplemental-kaggle",
+        action="store_true",
+        help="Include supplemental Kaggle NCAA Basketball features if available.",
+    )
+    parser.add_argument(
+        "--supplemental-dir",
+        type=Path,
+        default=None,
+        help="Override path for the supplemental NCAA Basketball dataset.",
+    )
     args = parser.parse_args()
 
     config = get_config()
+    data_dir = args.data_dir if args.data_dir else config.paths.raw_data_dir
+    supplemental_dir = args.supplemental_dir if args.supplemental_dir else config.paths.supplemental_ncaa_dir
     dataset, diagnostics = load_and_build_dataset(
-        data_dir=args.data_dir,
+        data_dir=data_dir,
         massey_system=args.massey_system,
+        include_supplemental_kaggle=args.include_supplemental_kaggle,
+        supplemental_dir=supplemental_dir,
+        reports_dir=config.paths.outputs_dir / "reports",
     )
 
     save_path = args.save_dataset or (config.paths.processed_data_dir / "matchup_dataset.csv")
@@ -53,6 +70,14 @@ def main() -> None:
     diagnostics_path.write_text(json.dumps(diagnostics.to_dict(), indent=2))
     feature_summary_path = reports_dir / "feature_summary.json"
     save_feature_summary_report(diagnostics, feature_summary_path)
+    if diagnostics.supplemental_details:
+        supplemental_summary_path = reports_dir / "supplemental_feature_summary.json"
+        supplemental_summary_path.write_text(
+            json.dumps(diagnostics.supplemental_details, indent=2)
+        )
+
+    inventory_path = reports_dir / "local_dataset_inventory.json"
+    write_local_dataset_inventory(Path(data_dir), Path(supplemental_dir), inventory_path)
 
     print("Dataset saved to", save_path)
     print("Diagnostics saved to", diagnostics_path)

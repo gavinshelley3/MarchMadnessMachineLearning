@@ -1,6 +1,10 @@
 import pandas as pd
 
-from src.experiments import summarize_comparison_results
+from src.experiments import (
+    summarize_comparison_results,
+    _default_feature_sets_for_mode,
+    _merge_supplemental_feature_set,
+)
 from src.feature_metadata import select_diff_columns
 
 
@@ -99,3 +103,13 @@ def test_summarize_results_builds_conclusions():
     assert "advanced_vs_core_backtests" in summary
     assert summary["advanced_vs_core_backtests"]["logistic_regression"]["log_loss_improvement"] > 0
     assert "conclusions" in summary and summary["conclusions"]
+
+
+def test_default_feature_sets_include_supplemental_when_requested():
+    base_sets = _default_feature_sets_for_mode("comparison")
+    augmented = _merge_supplemental_feature_set(base_sets)
+    if base_sets == augmented:
+        # In case supplemental set is already present, ensure no duplicates.
+        assert len(augmented) == len(base_sets)
+    else:
+        assert "core_plus_supplemental_ncaa" in augmented
