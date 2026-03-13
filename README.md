@@ -147,6 +147,33 @@ Once matchup probabilities are saved (see `outputs/predictions/2026_matchup_pred
 
 Use the `--bracket-file` flag to point to the official bracket JSON once it is released.
 
+## 2026 Tournament Simulation
+
+After matchup probabilities exist, run Monte Carlo tournaments to convert single-game odds into advancement probabilities:
+
+```bash
+python -m src.simulate_bracket \
+  --bracket-file data/brackets/projected_2026_bracket.json \
+  --predictions-file outputs/predictions/2026_matchup_predictions.csv \
+  --n-sims 5000 \
+  --seed 123
+```
+
+Outputs (under `outputs/brackets/`) include advancement probabilities, simulation summaries, deterministic pick confidence, and upset risk callouts. Swap `--bracket-file` once the official bracket is available, and tune `--n-sims`/`--seed` to trade runtime for smoother estimates.
+
+## Final Results Report
+
+When all modeling/bracket artifacts are in place, generate presentation-ready summaries and charts with:
+
+```bash
+python -m src.generate_results_report \
+  --reports-dir outputs/reports \
+  --brackets-dir outputs/brackets \
+  --output-dir outputs/final_report
+```
+
+This writes polished markdown/HTML/JSON summaries plus a handful of charts (model comparison, backtests, simulation probabilities, pick confidence) and bracket highlight sheets to `outputs/final_report/`. Each section degrades gracefully if optional artifacts are missing; point the CLI flags at alternate directories if you rerun experiments elsewhere.
+
 ## Testing & CI
 
 Run the test suite locally with:
