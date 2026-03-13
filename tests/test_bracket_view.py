@@ -82,5 +82,5 @@ def test_bracket_view_generates_html(tmp_path: Path) -> None:
     assert result_path.exists()
     html_text = result_path.read_text()
     assert "Duke" in html_text
-    assert "90.0%" in html_text  # team-specific probability
-    assert "Winner: Duke" in html_text
+    assert "90.0% win" in html_text  # winner probability label
+    assert 'class="champion-card"' in html_text
