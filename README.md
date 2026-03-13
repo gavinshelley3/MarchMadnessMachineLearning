@@ -147,6 +147,27 @@ Once matchup probabilities are saved (see `outputs/predictions/2026_matchup_pred
 
 Use the `--bracket-file` flag to point to the official bracket JSON once it is released.
 
+## 2026 Tournament Simulation
+
+After matchup probabilities exist, you can run Monte Carlo simulations to translate single-game odds into whole-bracket advancement probabilities:
+
+```bash
+python -m src.simulate_bracket \
+  --bracket-file data/brackets/projected_2026_bracket.json \
+  --predictions-file outputs/predictions/2026_matchup_predictions.csv \
+  --n-sims 5000 \
+  --seed 123
+```
+
+Outputs (written to `outputs/brackets/`) include:
+
+- `*_simulation_team_probabilities.csv` – advancement probabilities for every round (Round of 32 through champion).
+- `*_simulation_summary.json` – metadata (projected vs official), simulation settings, top champions, most common Final Four/championship matchups, and deterministic confidence counts.
+- `*_pick_confidence.csv` – deterministic bracket picks with matchup win probabilities and labeled confidence tiers (high ≥ 0.75, medium 0.60–0.75, low < 0.60).
+- `*_upset_risk_report.csv` – optional callouts for lower seeds with meaningful upset chances or favorites with early risk.
+
+Swap `--bracket-file` once the official bracket is available, and adjust `--n-sims`/`--seed` to trade runtime for smoother probability estimates.
+
 ## Testing & CI
 
 Run the test suite locally with:
