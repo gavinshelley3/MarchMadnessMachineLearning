@@ -184,6 +184,33 @@ Both flags are optional; by default the script will use the latest `_bracket_res
 
 The renderer arranges East/West and South/Midwest regions in true bracket form, flows rounds inward toward the Final Four, highlights winners, and calls out the champion prominently for presentation-ready screenshots.
 
+## Final Bracket Selection
+
+After both baseline and CBBpy-enriched predictions/simulations exist, run the selector to build a balanced final bracket without retraining:
+
+```bash
+# Optional replays of the deterministic baselines
+python -m src.bracket_selection --strategy baseline_deterministic --label baseline
+python -m src.bracket_selection --strategy enriched_deterministic --label cbbpy
+
+# Simulation-informed final bracket (default label = strategy name)
+python -m src.bracket_selection \
+  --strategy simulation_informed \
+  --baseline-weight 0.65 \
+  --close-margin 0.12 \
+  --simulation-weight 0.65 \
+  --label final
+```
+
+Strategies:
+
+- `baseline_deterministic` – greedy bracket from the production baseline probabilities.
+- `enriched_deterministic` – greedy bracket from the CBBpy-enriched probabilities.
+- `blended_probabilities` – convex combination of baseline/enriched win probabilities (controlled by `--baseline-weight`).
+- `simulation_informed` – blends win probabilities and uses Monte Carlo advancement odds for coin-flip situations while keeping high-confidence favorites intact.
+
+Each run writes labeled artifacts under `outputs/brackets/` (`*_bracket_results_<label>.json/.csv/.txt`) and a presentation HTML view at `outputs/final_report/bracket_view_final.html` unless `--no-render-html` is supplied. The selector also emits `outputs/reports/final_bracket_selection_comparison.json` (optionally `.md`), highlighting champion/final-four changes and round-by-round pick deltas versus both deterministic baselines. Swapping to the official bracket later only requires pointing `--bracket-file` at the new JSON.
+
 ## Supplemental Kaggle NCAA Basketball Integration
 
 Download the public [NCAA Basketball](https://www.kaggle.com/datasets/andrewsundberg/college-basketball-dataset) tables locally and extract the **men’s** CSVs into `data/raw/ncaa_basketball/`. Files such as `cbb.csv`, `cbb25.csv`, etc., are automatically detected as men’s data, while any `wbb`/women’s tables are logged and skipped. The dataset inventory report explicitly lists which files were ignored so you can confirm that women’s data never enters the modeling pipeline.
