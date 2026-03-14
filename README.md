@@ -296,6 +296,37 @@ Artifacts:
 
 The advancement NN is optional (nothing in the bracket flow changes automatically), but it provides a bracket-aware plausibility signal that can later augment the deterministic picks or simulation weighting.
 
+## Advancement-Informed Final Bracket Selection
+
+The advancement NN now plugs into the bracket workflow as a transparent tie-breaker:
+
+1. **Infer advancement probabilities for the projected/official field**
+   ```bash
+   python -m src.advancement_inference \
+     --season 2026 \
+     --bracket-file data/brackets/projected_2026_bracket.json \
+     --baseline-predictions outputs/predictions/2026_matchup_predictions_projected_field_baseline.csv
+   ```
+   This resolves every projected team (plus play-in options) to TeamIDs, rebuilds their pre-tournament features, loads the saved SGD advancement model, and writes `outputs/predictions/2026_advancement_probabilities.csv` alongside `outputs/reports/advancement_inference_summary.json`.
+
+2. **Blend matchup, simulation, and advancement signals when selecting the final bracket**
+   ```bash
+   python -m src.bracket_selection \
+     --strategy advancement_informed \
+     --label final_adv \
+     --baseline-predictions outputs/predictions/2026_matchup_predictions_projected_field_baseline.csv \
+     --enriched-predictions outputs/predictions/2026_matchup_predictions_projected_field_cbbpy.csv \
+     --simulation-probabilities outputs/brackets/2026_projected_simulation_team_probabilities_cbbpy.csv \
+     --advancement-probabilities outputs/predictions/2026_advancement_probabilities.csv \
+     --baseline-weight 0.65 \
+     --simulation-weight 0.35 \
+     --advancement-weight 0.3 \
+     --close-margin 0.12
+   ```
+   The `advancement_informed` strategy blends baseline/enriched matchup odds, consults Monte Carlo advancement rates when available, and tilts close calls using the NN’s team-level probabilities. Outputs still land under `outputs/brackets/` (JSON/CSV/txt), the rendered HTML view (default `outputs/final_report/bracket_view_final.html`), and a comparison report (for example `outputs/reports/advancement_bracket_comparison.json`), making it easy to see how the new signal changed Final Four and champion picks.
+
+Both commands remain bracket-file driven, so swapping in the official bracket JSON automatically reuses the same inference + selection flow without touching code.
+
 ## Testing & CI
 
 Run the test suite locally with:

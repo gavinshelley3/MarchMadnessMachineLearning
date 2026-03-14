@@ -111,6 +111,36 @@ class SimulationProbabilities:
         return entry.get(column)
 
 
+class AdvancementProbabilities:
+    """Lookup wrapper around advancement NN probabilities."""
+
+    def __init__(self, path: Path) -> None:
+        if not path.exists():
+            raise FileNotFoundError(f"Advancement probabilities file {path} not found.")
+        df = pd.read_csv(path)
+        if "team_key" not in df.columns and "TeamName" not in df.columns:
+            raise ValueError(
+                f"Advancement probabilities file {path} must include a 'team_key' or 'TeamName' column."
+            )
+        self.path = path
+        self.rows: Dict[str, Dict[str, float]] = {}
+        for record in df.to_dict(orient="records"):
+            key = _normalize_key(record.get("team_key") or record.get("TeamName"))
+            if not key:
+                continue
+            numeric_fields = {k: float(v) for k, v in record.items() if isinstance(v, (int, float))}
+            self.rows[key] = numeric_fields
+
+    def stage_probability(self, team_key: str, round_name: str) -> Optional[float]:
+        column = ROUND_STAGE_MAP.get(round_name)
+        if not column:
+            return None
+        entry = self.rows.get(_normalize_key(team_key))
+        if not entry:
+            return None
+        return entry.get(column)
+
+
 class SimulationInformedPolicy:
     """Selection policy that consults advancement probabilities for close games."""
 
@@ -154,6 +184,79 @@ class SimulationInformedPolicy:
 
         if abs(fav_score - under_score) < 1e-4:
             # Break exact ties by preferring the lower seed to keep brackets balanced.
+            return favorite if favorite.seed <= underdog.seed else underdog
+        return favorite if fav_score >= under_score else underdog
+
+
+class AdvancementInformedPolicy:
+    """Selection policy that blends matchup, simulation, and advancement NN signals."""
+
+    def __init__(
+        self,
+        advancement_probs: AdvancementProbabilities,
+        simulation_probs: Optional[SimulationProbabilities] = None,
+        close_margin: float = 0.10,
+        simulation_weight: float = 0.5,
+        advancement_weight: float = 0.35,
+    ) -> None:
+        if simulation_weight < 0 or advancement_weight < 0:
+            raise ValueError("Weights must be non-negative.")
+        total_weight = simulation_weight + advancement_weight
+        if total_weight >= 1.0:
+            raise ValueError("simulation_weight + advancement_weight must be < 1.")
+        self.advancement_probs = advancement_probs
+        self.simulation_probs = simulation_probs
+        self.close_margin = max(0.0, close_margin)
+        self.simulation_weight = simulation_weight
+        self.advancement_weight = advancement_weight
+        self.base_weight = 1.0 - total_weight
+        self.high_conf_threshold = CONFIDENCE_THRESHOLDS["high"]
+
+    def _score_with_signal(
+        self,
+        base_prob: float,
+        signal_prob: Optional[float],
+        weight: float,
+        fallback: float,
+    ) -> float:
+        if signal_prob is None:
+            return weight * fallback
+        return weight * signal_prob
+
+    def __call__(
+        self,
+        team1: TeamState,
+        team2: TeamState,
+        prob_team1: float,
+        prob_team2: float,
+        round_name: str,
+        slot: str,
+        region: Optional[str],
+    ) -> TeamState:
+        del slot, region
+        margin = abs(prob_team1 - prob_team2)
+        favorite = team1 if prob_team1 >= prob_team2 else team2
+        underdog = team2 if favorite is team1 else team1
+        favorite_prob = max(prob_team1, prob_team2)
+
+        if favorite_prob >= self.high_conf_threshold or margin >= self.close_margin:
+            return favorite
+
+        sim_fav = self.simulation_probs.stage_probability(favorite.team_key, round_name) if self.simulation_probs else None
+        sim_under = (
+            self.simulation_probs.stage_probability(underdog.team_key, round_name) if self.simulation_probs else None
+        )
+        adv_fav = self.advancement_probs.stage_probability(favorite.team_key, round_name)
+        adv_under = self.advancement_probs.stage_probability(underdog.team_key, round_name)
+
+        fav_score = self.base_weight * favorite_prob
+        under_score = self.base_weight * (1 - favorite_prob)
+        fav_score += self._score_with_signal(favorite_prob, sim_fav, self.simulation_weight, favorite_prob)
+        under_score += self._score_with_signal(1 - favorite_prob, sim_under, self.simulation_weight, 1 - favorite_prob)
+        fav_score += self._score_with_signal(favorite_prob, adv_fav, self.advancement_weight, favorite_prob)
+        under_score += self._score_with_signal(1 - favorite_prob, adv_under, self.advancement_weight, 1 - favorite_prob)
+
+        if abs(fav_score - under_score) < 1e-4:
             return favorite if favorite.seed <= underdog.seed else underdog
         return favorite if fav_score >= under_score else underdog
 
@@ -260,6 +363,8 @@ def run_selection(
     enriched_predictions: Optional[Path],
     baseline_weight: float,
     simulation_probabilities: Optional[Path],
+    advancement_probabilities: Optional[Path],
+    advancement_weight: float,
     label_suffix: Optional[str],
     output_dir: Path,
     comparison_json: Path,
@@ -288,7 +393,7 @@ def run_selection(
         if not enriched_predictions:
             raise ValueError("Enriched predictions are required for enriched_deterministic strategy.")
         predictions_path = enriched_predictions
-    elif strategy in {"blended_probabilities", "simulation_informed"}:
+    elif strategy in {"blended_probabilities", "simulation_informed", "advancement_informed"}:
         if not enriched_predictions:
             raise ValueError("Enriched predictions are required for blending or simulation strategies.")
         lookup = BlendedPredictionLookup(
@@ -306,6 +411,18 @@ def run_selection(
                 simulation_probs=sim_probs,
                 close_margin=close_margin,
                 stage_weight=simulation_weight,
+            )
+        elif strategy == "advancement_informed":
+            if not advancement_probabilities:
+                raise ValueError("Advancement probabilities are required for advancement_informed strategy.")
+            adv_probs = AdvancementProbabilities(advancement_probabilities)
+            sim_probs = SimulationProbabilities(simulation_probabilities) if simulation_probabilities else None
+            selection_policy = AdvancementInformedPolicy(
+                advancement_probs=adv_probs,
+                simulation_probs=sim_probs,
+                close_margin=close_margin,
+                simulation_weight=simulation_weight,
+                advancement_weight=advancement_weight,
             )
     else:
         raise ValueError(f"Unsupported strategy '{strategy}'.")
@@ -329,8 +446,10 @@ def run_selection(
         "baseline_predictions": str(baseline_predictions),
         "enriched_predictions": str(enriched_predictions) if enriched_predictions else None,
         "simulation_probabilities": str(simulation_probabilities) if simulation_probabilities else None,
-        "baseline_weight": baseline_weight if strategy in {"blended_probabilities", "simulation_informed"} else None,
-        "simulation_weight": simulation_weight if strategy == "simulation_informed" else None,
+        "baseline_weight": baseline_weight if strategy in {"blended_probabilities", "simulation_informed", "advancement_informed"} else None,
+        "simulation_weight": simulation_weight if strategy in {"simulation_informed", "advancement_informed"} else None,
+        "advancement_probabilities": str(advancement_probabilities) if strategy == "advancement_informed" else None,
+        "advancement_weight": advancement_weight if strategy == "advancement_informed" else None,
     }
     _write_comparison_summary(
         final_payload,
@@ -375,6 +494,7 @@ def parse_args() -> argparse.Namespace:
             "enriched_deterministic",
             "blended_probabilities",
             "simulation_informed",
+            "advancement_informed",
         ],
         default="simulation_informed",
         help="Bracket-selection strategy to run.",
@@ -398,6 +518,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=brackets_dir / "2026_projected_simulation_team_probabilities_cbbpy.csv",
         help="Simulation team probability CSV to guide close decisions.",
+    )
+    parser.add_argument(
+        "--advancement-probabilities",
+        type=Path,
+        default=predictions_dir / "2026_advancement_probabilities.csv",
+        help="Advancement NN probability CSV for the projected field.",
     )
     parser.add_argument(
         "--baseline-bracket-json",
@@ -428,6 +554,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.65,
         help="Weight for simulation advancement probabilities when making close calls.",
+    )
+    parser.add_argument(
+        "--advancement-weight",
+        type=float,
+        default=0.3,
+        help="Weight for advancement NN probabilities when making close calls.",
     )
     parser.add_argument(
         "--label",
@@ -484,9 +616,9 @@ def main() -> None:
         baseline_predictions=args.baseline_predictions,
         enriched_predictions=args.enriched_predictions,
         baseline_weight=args.baseline_weight,
-        simulation_probabilities=args.simulation_probabilities
-        if args.strategy == "simulation_informed"
-        else None,
+        simulation_probabilities=args.simulation_probabilities,
+        advancement_probabilities=args.advancement_probabilities,
+        advancement_weight=args.advancement_weight,
         label_suffix=args.label,
         output_dir=args.output_dir,
         comparison_json=args.comparison_json,
