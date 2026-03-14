@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, asdict, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -40,6 +40,45 @@ BOX_NUMERIC_COLUMNS = [
     "blk",
     "to",
 ]
+
+
+def _compute_recent_cbbpy_features(games: pd.DataFrame) -> pd.DataFrame:
+    if "game_date" not in games.columns:
+        return pd.DataFrame()
+    recent = games.dropna(subset=["game_date"]).copy()
+    if recent.empty:
+        return pd.DataFrame()
+    recent["game_date"] = pd.to_datetime(recent["game_date"], errors="coerce")
+    recent = recent.dropna(subset=["game_date"])
+    if recent.empty:
+        return pd.DataFrame()
+    recent = recent.sort_values(["team", "game_date"])
+    recent["win_float"] = recent["win"].astype(float)
+    recent["margin_float"] = recent["margin"].astype(float)
+    for window in (5, 10):
+        recent[f"win_roll_{window}"] = (
+            recent.groupby("team")["win_float"]
+            .rolling(window=window, min_periods=1)
+            .mean()
+            .reset_index(level=0, drop=True)
+        )
+        recent[f"margin_roll_{window}"] = (
+            recent.groupby("team")["margin_float"]
+            .rolling(window=window, min_periods=1)
+            .mean()
+            .reset_index(level=0, drop=True)
+        )
+    summary = (
+        recent.groupby("team")
+        .agg(
+            CBBpy_Last5_WinPct=("win_roll_5", "last"),
+            CBBpy_Last10_WinPct=("win_roll_10", "last"),
+            CBBpy_Last5_ScoringMargin=("margin_roll_5", "last"),
+            CBBpy_Last10_ScoringMargin=("margin_roll_10", "last"),
+        )
+        .reset_index()
+    )
+    return summary
 
 
 @dataclass
@@ -82,7 +121,46 @@ def _sanitize_date_component(value: date) -> str:
     return value.strftime("%Y%m%d")
 
 
-def _ensure_boxscores(season: int, start: date, end: date, cache_dir: Path, refresh: bool) -> Tuple[pd.DataFrame, CBBpyDiagnostics]:
+def _fetch_boxscores_chunked(start: date, end: date, chunk_days: int) -> Tuple[pd.DataFrame, pd.DataFrame, bool]:
+    frames_box: List[pd.DataFrame] = []
+    frames_info: List[pd.DataFrame] = []
+    cursor = start
+    window = max(1, chunk_days)
+    info_supported = True
+    while cursor <= end:
+        chunk_end = min(cursor + timedelta(days=window - 1), end)
+        try:
+            info_chunk, box_chunk, _ = mens_scraper.get_games_range(
+                cursor.isoformat(),
+                chunk_end.isoformat(),
+                info=True,
+                box=True,
+                pbp=False,
+            )
+        except Exception:
+            info_supported = False
+            _, box_chunk, _ = mens_scraper.get_games_range(
+                cursor.isoformat(),
+                chunk_end.isoformat(),
+                info=False,
+                box=True,
+                pbp=False,
+            )
+            info_chunk = None
+        if info_chunk is not None and not info_chunk.empty:
+            frames_info.append(info_chunk.copy())
+        if box_chunk is not None and not box_chunk.empty:
+            frames_box.append(box_chunk.copy())
+        cursor = chunk_end + timedelta(days=1)
+    info_df = pd.concat(frames_info, ignore_index=True) if frames_info else pd.DataFrame()
+    box_df = pd.concat(frames_box, ignore_index=True) if frames_box else pd.DataFrame()
+    if not box_df.empty and not info_df.empty and {"game_id", "game_date"}.issubset(info_df.columns):
+        info_subset = info_df[["game_id", "game_date"]].drop_duplicates("game_id")
+        box_df = box_df.merge(info_subset, on="game_id", how="left")
+    return box_df, info_df, info_supported
+
+
+def _ensure_boxscores(season: int, start: date, end: date, cache_dir: Path, refresh: bool, chunk_days: int) -> Tuple[pd.DataFrame, CBBpyDiagnostics]:
     if mens_scraper is None:
         raise RuntimeError("cbbpy is not installed. Run `pip install cbbpy` to enable current-season enrichment.")
 
@@ -96,20 +174,20 @@ def _ensure_boxscores(season: int, start: date, end: date, cache_dir: Path, refr
         cache_file=str(cache_path),
     )
 
+    diagnostics.notes.append(f"chunk_days={chunk_days}")
+
     if cache_path.exists() and not refresh:
         diagnostics.fetched_from_cache = True
         box_df = pd.read_csv(cache_path)
         diagnostics.games_scraped = int(box_df["game_id"].nunique()) if not box_df.empty else 0
         diagnostics.teams_scraped = int(box_df["team"].nunique()) if not box_df.empty else 0
+        if "game_date" not in box_df.columns:
+            diagnostics.notes.append("Cached boxscores missing game_date; rerun with --refresh to enable recency features.")
         return box_df, diagnostics
 
-    _, box_df, _ = mens_scraper.get_games_range(
-        start.isoformat(),
-        end.isoformat(),
-        info=False,
-        box=True,
-        pbp=False,
-    )
+    box_df, _, info_supported = _fetch_boxscores_chunked(start, end, chunk_days)
+    if not info_supported:
+        diagnostics.notes.append("CBBpy info feed unavailable for part of the range; game_date column may be missing.")
     box_df.to_csv(cache_path, index=False)
     diagnostics.games_scraped = int(box_df["game_id"].nunique()) if not box_df.empty else 0
     diagnostics.teams_scraped = int(box_df["team"].nunique()) if not box_df.empty else 0
@@ -165,10 +243,15 @@ def build_team_features_from_boxscores(
     work = box_df.copy()
     work["team"] = work["team"].astype(str)
     work["game_id"] = work["game_id"].astype(str)
+    if "game_date" in work.columns:
+        work["game_date"] = pd.to_datetime(work["game_date"], errors="coerce")
     for column in BOX_NUMERIC_COLUMNS:
         work[column] = pd.to_numeric(work.get(column, 0), errors="coerce").fillna(0.0)
 
-    grouped = work.groupby(["game_id", "team"], as_index=False)[BOX_NUMERIC_COLUMNS].sum()
+    agg_map = {col: "sum" for col in BOX_NUMERIC_COLUMNS}
+    if "game_date" in work.columns:
+        agg_map["game_date"] = "max"
+    grouped = work.groupby(["game_id", "team"], as_index=False).agg(agg_map)
     grouped["possessions"] = (
         grouped["fga"] - grouped["oreb"] + grouped["to"] + 0.44 * grouped["fta"]
     )
@@ -273,12 +356,65 @@ def build_team_features_from_boxscores(
         "CBBpy_NetRating",
     ]
     output = mapped[["TeamID", "SourceTeamName"] + feature_cols].copy()
+    recent_features = _compute_recent_cbbpy_features(games)
+    if not recent_features.empty:
+        output = output.merge(
+            recent_features,
+            left_on="SourceTeamName",
+            right_on="team",
+            how="left",
+        )
+        output = output.drop(columns=["team"], errors="ignore")
+        for recent_col in [
+            "CBBpy_Last5_WinPct",
+            "CBBpy_Last10_WinPct",
+            "CBBpy_Last5_ScoringMargin",
+            "CBBpy_Last10_ScoringMargin",
+        ]:
+            if recent_col not in output.columns:
+                output[recent_col] = np.nan
     output.insert(0, "Season", season)
     return output, {
         "season": season,
         "teams_matched": int(mapped["TeamID"].nunique()),
         "teams_unmatched": unmatched,
         "total_scraped_teams": int(team_summary["SourceTeamName"].nunique()),
+    }
+
+
+def _save_feature_summary(features_df: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "season": int(features_df["Season"].min()) if not features_df.empty else None,
+        "row_count": int(len(features_df)),
+        "feature_columns": [col for col in features_df.columns if col not in {"Season", "TeamID"}],
+    }
+    path.write_text(json.dumps(summary, indent=2))
+
+
+def _build_seed_coverage_report(
+    features_df: pd.DataFrame,
+    data_dir: Path,
+    season: int,
+) -> Dict[str, object]:
+    seeds = data_loading.load_tourney_seeds(data_dir)
+    teams = data_loading.load_teams(data_dir)
+    seeds_season = seeds[seeds["Season"] == season][["TeamID", "Seed"]].drop_duplicates()
+    coverage_df = seeds_season.merge(teams[["TeamID", "TeamName"]], on="TeamID", how="left")
+    coverage_df["has_cbbpy"] = coverage_df["TeamID"].isin(features_df["TeamID"])
+    coverage = float(coverage_df["has_cbbpy"].mean()) if not coverage_df.empty else 0.0
+    unmatched = (
+        coverage_df.loc[~coverage_df["has_cbbpy"], "TeamName"]
+        .dropna()
+        .drop_duplicates()
+        .tolist()
+    )
+    return {
+        "season": season,
+        "target_team_count": int(len(coverage_df)),
+        "teams_with_cbbpy": int(coverage_df["has_cbbpy"].sum()),
+        "coverage_rate": coverage,
+        "teams_missing_cbbpy": unmatched,
     }
 
 
@@ -296,9 +432,10 @@ def run_enrichment(
     start_date: Optional[str],
     end_date: Optional[str],
     refresh: bool,
+    chunk_days: int,
 ) -> Path:
     start, end = _parse_dates_for_season(season, start_date, end_date)
-    box_df, diagnostics = _ensure_boxscores(season, start, end, cache_dir, refresh)
+    box_df, diagnostics = _ensure_boxscores(season, start, end, cache_dir, refresh, chunk_days)
     teams_df = data_loading.load_teams(data_dir)
     spellings_df = _load_team_spellings(data_dir)
     features_df, mapping_diag = build_team_features_from_boxscores(box_df, season, teams_df, spellings_df)
@@ -309,6 +446,11 @@ def run_enrichment(
     features_df.to_csv(output_path, index=False)
     diagnostics.features_file = str(output_path)
     save_cbbpy_reports(diagnostics, reports_dir)
+    if not features_df.empty:
+        _save_feature_summary(features_df, reports_dir / "cbbpy_feature_summary.json")
+        coverage_report = _build_seed_coverage_report(features_df, data_dir, season)
+        coverage_path = reports_dir / f"cbbpy_coverage_{season}.json"
+        coverage_path.write_text(json.dumps(coverage_report, indent=2))
     return output_path
 
 
@@ -336,6 +478,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Directory for diagnostic JSON output (defaults to outputs/reports).",
     )
+    parser.add_argument(
+        "--chunk-days",
+        type=int,
+        default=14,
+        help="Number of days per scraping chunk (smaller windows reduce ESPN timeouts).",
+    )
     return parser.parse_args()
 
 
@@ -355,6 +503,7 @@ def main() -> None:
         start_date=args.start_date,
         end_date=args.end_date,
         refresh=args.refresh,
+        chunk_days=max(1, args.chunk_days),
     )
     print(f"CBBpy enrichment complete. Features saved to {output_path}")
 

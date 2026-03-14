@@ -216,16 +216,16 @@ Set `--skip-backtests` if runtime becomes excessive. All supplemental signals re
 
 [CBBpy](https://pypi.org/project/cbbpy/) provides an ESPN scraper for men’s college basketball. It is already listed in `requirements.txt`, so `pip install -r requirements.txt` installs it automatically. This repo only uses the **men’s** scraper and never touches `cbbpy.womens_scraper`.
 
-1. Fetch and cache boxscores for the desired portion of the current season (defaults to November 1 → today when omitted):
+1. Fetch and cache a broad slice of the current season (leave the dates blank to pull everything from Nov 1 → today, and use smaller `--chunk-days` if ESPN throttles large windows):
    ```bash
    python -m src.cbbpy_enrichment \
      --season 2026 \
-     --start-date 2026-03-01 \
-     --end-date 2026-03-01
+     --refresh \
+     --chunk-days 10
    ```
    - Raw boxscores are saved under `data/current_season/cbbpy/` so repeated runs reuse the cache.
    - Team-level feature tables land in `data/current_season/cbbpy/cbbpy_team_features_<season>.csv`.
-   - Diagnostics (games scraped, teams matched, unmatched aliases, cache hits) are written to `outputs/reports/cbbpy_fetch_summary.json`.
+   - Diagnostics (games scraped, teams matched, unmatched aliases, cache hits, coverage of 2026 seeds) are written to `outputs/reports/cbbpy_fetch_summary.json` and `outputs/reports/cbbpy_coverage_<season>.json`.
 2. Use the cached features inside the existing pipeline when desired:
    - Dataset diagnostics / experiments / training:
      ```bash
@@ -235,8 +235,33 @@ Set `--skip-backtests` if runtime becomes excessive. All supplemental signals re
        --cbbpy-season 2026 \
        --cbbpy-features data/current_season/cbbpy/cbbpy_team_features_2026.csv
      ```
-   - Experiments: add `--include-cbbpy-current` (and optionally `--feature-sets core core_plus_cbbpy_current`) to compare the production configuration against the CBBpy-augmented set.
-   - Training: pass `--include-cbbpy-current` to inject the cached features into the modeling dataset before fitting.
+   - Experiments: add `--include-cbbpy-current` (and optionally `--feature-sets core core_plus_opponent_adjustment_cbbpy`) to compare the production configuration against the CBBpy-augmented set.
+   - Training & inference (baseline vs. CBBpy-enriched):
+     ```bash
+     python -m src.predict_2026 \
+       --season 2026 \
+       --feature-set core_plus_opponent_adjustment \
+       --output outputs/predictions/2026_matchup_predictions_baseline.csv
+
+     python -m src.predict_2026 \
+       --season 2026 \
+       --include-cbbpy-current \
+       --feature-set core_plus_opponent_adjustment_cbbpy \
+       --cbbpy-season 2026 \
+       --cbbpy-features data/current_season/cbbpy/cbbpy_team_features_2026.csv \
+       --output outputs/predictions/2026_matchup_predictions_cbbpy.csv
+
+     python -m src.compare_predictions \
+       --baseline outputs/predictions/2026_matchup_predictions_baseline.csv \
+       --enriched outputs/predictions/2026_matchup_predictions_cbbpy.csv \
+       --output outputs/reports/cbbpy_2026_inference_comparison.json
+     ```
+     Use either predictions file when generating brackets/simulations:
+     ```bash
+     python -m src.generate_bracket \
+       --bracket-file data/brackets/projected_2026_bracket.json \
+       --predictions-file outputs/predictions/2026_matchup_predictions_cbbpy.csv
+     ```
 
 The enrichment remains optional—the model still runs if the CBBpy cache is absent, and the optional feature group can be toggled via `--include-cbbpy-current`. Women’s data is intentionally excluded and any ambiguous team names are logged under `outputs/reports/cbbpy_fetch_summary.json` for review.
 

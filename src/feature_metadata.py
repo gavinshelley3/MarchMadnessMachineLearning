@@ -85,6 +85,10 @@ CBBPY_CURRENT_FEATURES: List[str] = [
     "CBBpy_OffRating",
     "CBBpy_DefRating",
     "CBBpy_NetRating",
+    "CBBpy_Last5_WinPct",
+    "CBBpy_Last10_WinPct",
+    "CBBpy_Last5_ScoringMargin",
+    "CBBpy_Last10_ScoringMargin",
 ]
 
 FEATURE_GROUPS: Dict[str, List[str]] = {
@@ -115,6 +119,7 @@ FEATURE_SET_DEFINITIONS: Dict[str, List[str]] = {
     "core_plus_possession_ratings": ["core", "possession_ratings"],
     "core_plus_recent_form": ["core", "recent_form"],
     "core_plus_opponent_adjustment": ["core", "opponent_adjustment"],
+    "core_plus_opponent_adjustment_cbbpy": ["core", "opponent_adjustment", "cbbpy_current"],
     "core_plus_neutral_context": ["core", "neutral_context"],
     "core_plus_rebound_turnover": ["core", "rebound_turnover"],
     "core_plus_supplemental_ncaa": ["core", "supplemental_ncaa"],
@@ -129,6 +134,7 @@ FEATURE_SET_DESCRIPTIONS: Dict[str, str] = {
     "core_plus_possession_ratings": "Core + offensive/defensive/net ratings derived from possessions.",
     "core_plus_recent_form": "Core + 5- and 10-game momentum metrics.",
     "core_plus_opponent_adjustment": "Core + opponent-adjusted scoring margin.",
+    "core_plus_opponent_adjustment_cbbpy": "Core + opponent-adjusted scoring margin + current-season CBBpy enrichment.",
     "core_plus_neutral_context": "Core + neutral-site win rate/margin.",
     "core_plus_rebound_turnover": "Core + rebound/turnover margin features.",
     "core_plus_supplemental_ncaa": "Core + NCAA Basketball supplemental tempo/efficiency metrics.",
