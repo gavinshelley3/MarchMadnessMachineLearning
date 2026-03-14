@@ -7,6 +7,8 @@ import pandas as pd
 from src.bracket_generation import BracketGenerator, TeamState
 from src.bracket_loader import load_bracket_definition
 from src.bracket_selection import (
+    AdvancementInformedPolicy,
+    AdvancementProbabilities,
     BlendedPredictionLookup,
     SimulationInformedPolicy,
     SimulationProbabilities,
@@ -121,6 +123,44 @@ def test_simulation_informed_policy_prefers_simulation(tmp_path: Path) -> None:
     assert winner is team1
 
 
+def test_advancement_informed_policy_consults_advancement(tmp_path: Path) -> None:
+    adv_path = tmp_path / "adv.csv"
+    pd.DataFrame(
+        [
+            {
+                "team_key": "Fav",
+                "round_of_32_probability": 0.4,
+                "sweet_16_probability": 0.3,
+                "elite_8_probability": 0.2,
+                "final_four_probability": 0.15,
+                "championship_game_probability": 0.1,
+                "champion_probability": 0.05,
+            },
+            {
+                "team_key": "Dog",
+                "round_of_32_probability": 0.8,
+                "sweet_16_probability": 0.6,
+                "elite_8_probability": 0.4,
+                "final_four_probability": 0.3,
+                "championship_game_probability": 0.2,
+                "champion_probability": 0.1,
+            },
+        ]
+    ).to_csv(adv_path, index=False)
+    adv_lookup = AdvancementProbabilities(adv_path)
+    policy = AdvancementInformedPolicy(
+        advancement_probs=adv_lookup,
+        simulation_probs=None,
+        close_margin=0.5,
+        simulation_weight=0.0,
+        advancement_weight=0.4,
+    )
+    team1 = TeamState(team_key="Fav", display_name="Fav", seed=1, region="R", source_slot="")
+    team2 = TeamState(team_key="Dog", display_name="Dog", seed=10, region="R", source_slot="")
+    winner = policy(team1, team2, 0.52, 0.48, "R64", "slot", "R")
+    assert winner is team2
+
+
 def test_run_selection_outputs(tmp_path: Path) -> None:
     bracket_path = _build_bracket(tmp_path)
     bracket = load_bracket_definition(bracket_path)
@@ -151,6 +191,8 @@ def test_run_selection_outputs(tmp_path: Path) -> None:
         enriched_predictions=enriched_path,
         baseline_weight=0.6,
         simulation_probabilities=None,
+        advancement_probabilities=None,
+        advancement_weight=0.3,
         label_suffix="final",
         output_dir=tmp_path / "final_brackets",
         comparison_json=tmp_path / "comparison.json",
@@ -164,3 +206,31 @@ def test_run_selection_outputs(tmp_path: Path) -> None:
     )
     assert result["outputs"]["json"].exists()
     assert (tmp_path / "comparison.json").exists()
+
+    adv_path = tmp_path / "adv_probs.csv"
+    _write_simulation_csv(adv_path, teams)
+    sim_path = tmp_path / "sim_probs.csv"
+    _write_simulation_csv(sim_path, teams)
+    adv_result = run_selection(
+        strategy="advancement_informed",
+        bracket_file=bracket_path,
+        season=2026,
+        baseline_predictions=baseline_path,
+        enriched_predictions=enriched_path,
+        baseline_weight=0.6,
+        simulation_probabilities=sim_path,
+        advancement_probabilities=adv_path,
+        advancement_weight=0.25,
+        label_suffix="adv",
+        output_dir=tmp_path / "adv_brackets",
+        comparison_json=tmp_path / "adv_comparison.json",
+        comparison_md=None,
+        baseline_bracket_json=baseline_outputs["json"],
+        enriched_bracket_json=enriched_outputs["json"],
+        render_html=False,
+        html_output=tmp_path / "adv.html",
+        close_margin=0.1,
+        simulation_weight=0.5,
+    )
+    assert adv_result["outputs"]["json"].exists()
+    assert (tmp_path / "adv_comparison.json").exists()
