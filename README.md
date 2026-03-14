@@ -267,6 +267,35 @@ Set `--skip-backtests` if runtime becomes excessive. All supplemental signals re
 
 The enrichment remains optional—the model still runs if the CBBpy cache is absent, and the optional feature group can be toggled via `--include-cbbpy-current`. Women’s data is intentionally excluded and any ambiguous team names are logged under `outputs/reports/cbbpy_fetch_summary.json` for review.
 
+## Second Neural Network: Tournament Advancement Model
+
+In addition to the matchup classifier, the repo now contains a team-level advancement model. It builds one row per tournament team/season (using the same pre-tournament features) and predicts multi-output probabilities for reaching the Round of 32, Sweet 16, Elite 8, Final Four, championship game, and winning the title.
+
+1. Build the dataset and train with Adam:
+   ```bash
+   python -m src.train_advancement \
+     --validation-start-season 2015 \
+     --optimizer adam \
+     --include-supplemental-kaggle
+   ```
+2. Re-run with SGD + momentum to compare optimizers on the exact same split:
+   ```bash
+   python -m src.train_advancement \
+     --validation-start-season 2015 \
+     --optimizer sgd \
+     --learning-rate 0.01 \
+     --sgd-momentum 0.9 \
+     --include-supplemental-kaggle
+   ```
+
+Artifacts:
+- Processed dataset: `data/processed/advancement_dataset.csv`
+- Models/scalers per optimizer: `outputs/models/advancement/<optimizer>/`
+- Validation predictions: `outputs/predictions/advancement_validation_<optimizer>.csv`
+- Optimizer comparison: `outputs/reports/advancement_optimizer_comparison.{json,csv}`
+
+The advancement NN is optional (nothing in the bracket flow changes automatically), but it provides a bracket-aware plausibility signal that can later augment the deterministic picks or simulation weighting.
+
 ## Testing & CI
 
 Run the test suite locally with:
