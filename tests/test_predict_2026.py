@@ -24,6 +24,22 @@ def test_build_inference_matchups_creates_ordered_pairs():
     assert row["Team2Name"] == "Beta"
 
 
+def test_build_inference_matchups_respects_allowed_ids():
+    context = pd.DataFrame(
+        {
+            "Season": [2026, 2026, 2026],
+            "TeamID": [1, 2, 3],
+            "GamesPlayed": [30, 28, 27],
+            "WinPercentage": [0.8, 0.6, 0.5],
+        }
+    )
+    teams_df = pd.DataFrame({"TeamID": [1, 2, 3], "TeamName": ["Alpha", "Beta", "Gamma"]})
+    allowed = {1, 3}
+    matchups = build_inference_matchups(context, teams_df, 2026, allowed_team_ids=allowed)
+    assert set(matchups["Team1ID"]).issubset(allowed)
+    assert set(matchups["Team2ID"]).issubset(allowed)
+
+
 def test_apply_cbbpy_overrides_updates_core_metrics():
     context = pd.DataFrame(
         {

@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.bracket_generation import BracketGenerator
-from src.bracket_loader import load_bracket_definition
+from src.bracket_loader import extract_bracket_field, load_bracket_definition
 
 
 def build_test_bracket(tmp_path: Path) -> Path:
@@ -97,3 +97,37 @@ def test_bracket_generation_outputs(tmp_path: Path) -> None:
     json_payload = json.loads(outputs["json"].read_text())
     assert json_payload["champion"]["team_key"] in all_teams
     assert json_payload["metadata"]["model_name"] == "logistic_regression"
+
+
+def test_extract_bracket_field_includes_play_in_options(tmp_path: Path) -> None:
+    payload = {
+        "season": 2026,
+        "bracket_type": "projected",
+        "regions": [
+            {
+                "name": "East",
+                "round_of_64": [
+                    {
+                        "slot": "E1",
+                        "round": "R64",
+                        "team1": {"seed": 1, "team_key": "Duke", "display_name": "Duke"},
+                        "team2": {
+                            "seed": 16,
+                            "display_name": "Play-In",
+                            "options": [
+                                {"team_key": "Howard", "display_name": "Howard"},
+                                {"team_key": "Idaho", "display_name": "Idaho"},
+                            ],
+                        },
+                    }
+                ],
+            }
+        ],
+        "final_four_pairings": [{"regions": ["East", "East"], "name": "FF1"}],
+    }
+    bracket_path = tmp_path / "bracket.json"
+    bracket_path.write_text(json.dumps(payload), encoding="utf-8")
+    bracket = load_bracket_definition(bracket_path)
+    field = extract_bracket_field(bracket)
+    keys = sorted(slot.team_key for slot in field)
+    assert keys == ["Duke", "Howard", "Idaho"]

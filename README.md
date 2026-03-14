@@ -265,6 +265,82 @@ Set `--skip-backtests` if runtime becomes excessive. All supplemental signals re
 
 The enrichment remains optional—the model still runs if the CBBpy cache is absent, and the optional feature group can be toggled via `--include-cbbpy-current`. Women’s data is intentionally excluded and any ambiguous team names are logged under `outputs/reports/cbbpy_fetch_summary.json` for review.
 
+## Bracket-Field Predictions and CBBpy Comparison
+
+Once the projected (or official) bracket JSON is in `data/brackets/`, you can restrict inference, bracket generation, and simulations to that field:
+
+1. **Baseline field-only predictions**
+   ```bash
+   python -m src.predict_2026 \
+     --season 2026 \
+     --data-dir data/raw \
+     --feature-set core_plus_opponent_adjustment \
+     --field-only \
+     --bracket-file data/brackets/projected_2026_bracket.json \
+     --output outputs/predictions/2026_matchup_predictions_projected_field_baseline.csv
+   ```
+2. **CBBpy-enriched field-only predictions**
+   ```bash
+   python -m src.predict_2026 \
+     --season 2026 \
+     --data-dir data/raw \
+     --feature-set core_plus_opponent_adjustment_cbbpy \
+     --field-only \
+     --bracket-file data/brackets/projected_2026_bracket.json \
+     --include-cbbpy-current \
+     --cbbpy-season 2026 \
+     --cbbpy-features data/current_season/cbbpy/cbbpy_team_features_2026.csv \
+     --output outputs/predictions/2026_matchup_predictions_projected_field_cbbpy.csv
+   ```
+3. **Deterministic brackets (label suffix keeps artifacts separate)**
+   ```bash
+   python -m src.generate_bracket \
+     --bracket-file data/brackets/projected_2026_bracket.json \
+     --predictions-file outputs/predictions/2026_matchup_predictions_projected_field_baseline.csv \
+     --label baseline
+
+   python -m src.generate_bracket \
+     --bracket-file data/brackets/projected_2026_bracket.json \
+     --predictions-file outputs/predictions/2026_matchup_predictions_projected_field_cbbpy.csv \
+     --label cbbpy
+   ```
+4. **Monte Carlo simulations (adjust `--n-sims` as desired)**
+   ```bash
+   python -m src.simulate_bracket \
+     --bracket-file data/brackets/projected_2026_bracket.json \
+     --predictions-file outputs/predictions/2026_matchup_predictions_projected_field_baseline.csv \
+     --label baseline \
+     --n-sims 3000
+
+   python -m src.simulate_bracket \
+     --bracket-file data/brackets/projected_2026_bracket.json \
+     --predictions-file outputs/predictions/2026_matchup_predictions_projected_field_cbbpy.csv \
+     --label cbbpy \
+     --n-sims 3000
+   ```
+5. **Baseline vs. enriched comparison report**
+   ```bash
+   python -m src.compare_brackets \
+     --baseline-bracket outputs/brackets/2026_projected_bracket_results_baseline.json \
+     --enriched-bracket outputs/brackets/2026_projected_bracket_results_cbbpy.json \
+     --baseline-summary outputs/brackets/2026_projected_simulation_summary_baseline.json \
+     --enriched-summary outputs/brackets/2026_projected_simulation_summary_cbbpy.json \
+     --output-json outputs/reports/cbbpy_bracket_comparison.json \
+     --output-md outputs/reports/cbbpy_bracket_comparison.md
+   ```
+6. **Visual bracket render (optional)**
+   ```bash
+   python -m src.render_bracket_view \
+     --bracket-results outputs/brackets/2026_projected_bracket_results_baseline.json \
+     --output outputs/final_report/bracket_view_baseline.html
+
+   python -m src.render_bracket_view \
+     --bracket-results outputs/brackets/2026_projected_bracket_results_cbbpy.json \
+     --output outputs/final_report/bracket_view_cbbpy.html
+   ```
+
+Swap `--bracket-file` to `data/brackets/official_2026_bracket.json` (or any updated file) once the real bracket is released. All commands automatically reuse the supplied bracket to determine the field, so no code changes are required.
+
 ## Testing & CI
 
 Run the test suite locally with:

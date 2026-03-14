@@ -45,6 +45,12 @@ def parse_args() -> argparse.Namespace:
         default=123,
         help="Random seed for reproducible simulations.",
     )
+    parser.add_argument(
+        "--label",
+        type=str,
+        default=None,
+        help="Optional label suffix (e.g., 'baseline' or 'cbbpy') for output filenames.",
+    )
     return parser.parse_args()
 
 
@@ -69,6 +75,7 @@ def main() -> Dict[str, Path]:
         n_sims=args.n_sims,
         seed=args.seed,
         output_dir=args.output_dir or (config.paths.outputs_dir / "brackets"),
+        label_suffix=args.label,
     )
     outputs = simulator.run()
     print("Simulation outputs:")

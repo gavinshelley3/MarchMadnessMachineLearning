@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 
 @dataclass
@@ -153,3 +153,37 @@ def describe_bracket(definition: BracketDefinition) -> Dict[str, Any]:
         "regions": {region.name: len(region.round_of_64) for region in definition.regions},
         "final_four_pairings": [pair.regions for pair in definition.final_four_pairings],
     }
+
+
+def _expand_team_slot(slot: TeamSlot) -> List[TeamSlot]:
+    entries = [slot]
+    for option in slot.options:
+        team_key = option.get("team_key")
+        if not team_key:
+            continue
+        display_name = option.get("display_name", team_key)
+        entries.append(
+            TeamSlot(
+                team_key=str(team_key),
+                display_name=str(display_name),
+                seed=slot.seed,
+                options=[],
+            )
+        )
+    return entries
+
+
+def extract_bracket_field(definition: BracketDefinition) -> List[TeamSlot]:
+    """Return the full tournament field, including play-in options."""
+
+    field: List[TeamSlot] = []
+    seen: Set[str] = set()
+    for matchup in definition.iter_round_of_64():
+        for participant in (matchup.team1, matchup.team2):
+            for entry in _expand_team_slot(participant):
+                key = entry.team_key
+                if key in seen:
+                    continue
+                seen.add(key)
+                field.append(entry)
+    return field

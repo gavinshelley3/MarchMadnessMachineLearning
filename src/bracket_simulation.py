@@ -39,6 +39,13 @@ ROUND_OUTPUTS = [
     ("champion", "Champion"),
 ]
 
+
+def _sanitize_label(label: Optional[str]) -> str:
+    if not label:
+        return ""
+    slug = str(label).strip().lower().replace(" ", "_")
+    return f"_{slug}" if slug else ""
+
 CONFIDENCE_THRESHOLDS = {
     "high": 0.75,
     "medium": 0.60,
@@ -133,6 +140,7 @@ class BracketSimulator:
         n_sims: int = 5000,
         seed: int = 123,
         output_dir: Optional[Path] = None,
+        label_suffix: Optional[str] = None,
     ):
         self.bracket_def = bracket_def
         self.predictions_path = predictions_path
@@ -141,6 +149,7 @@ class BracketSimulator:
         self.config = get_config()
         self.output_dir = output_dir or (self.config.paths.outputs_dir / "brackets")
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        self.label_suffix = _sanitize_label(label_suffix)
 
         self.lookup = PredictionLookup(predictions_path, bracket_def.season)
         self.rng = np.random.default_rng(seed)
@@ -331,10 +340,11 @@ class BracketSimulator:
         deterministic_results: Tuple[Dict[str, List[GameResult]], TeamState, PredictionLookup, List[Dict[str, object]]],
     ) -> SimulationPaths:
         prefix = f"{self.bracket_def.season}_{self.bracket_def.bracket_type}".replace(" ", "_").lower()
-        probabilities_path = self.output_dir / f"{prefix}_simulation_team_probabilities.csv"
-        summary_path = self.output_dir / f"{prefix}_simulation_summary.json"
-        confidence_path = self.output_dir / f"{prefix}_pick_confidence.csv"
-        upset_path = self.output_dir / f"{prefix}_upset_risk_report.csv"
+        suffix = self.label_suffix
+        probabilities_path = self.output_dir / f"{prefix}_simulation_team_probabilities{suffix}.csv"
+        summary_path = self.output_dir / f"{prefix}_simulation_summary{suffix}.json"
+        confidence_path = self.output_dir / f"{prefix}_pick_confidence{suffix}.csv"
+        upset_path = self.output_dir / f"{prefix}_upset_risk_report{suffix}.csv"
 
         tracker.probabilities_df().to_csv(probabilities_path, index=False)
         pd.DataFrame(confidence_rows).to_csv(confidence_path, index=False)

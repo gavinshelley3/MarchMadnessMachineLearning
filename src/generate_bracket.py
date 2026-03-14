@@ -37,6 +37,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override output directory (defaults to outputs/brackets).",
     )
+    parser.add_argument(
+        "--label",
+        type=str,
+        default=None,
+        help="Optional label suffix (e.g., 'baseline' or 'cbbpy') for output filenames.",
+    )
     return parser.parse_args()
 
 
@@ -60,7 +66,7 @@ def main() -> Dict[str, Path]:
         predictions_path=predictions_path,
         output_dir=args.output_dir or (config.paths.outputs_dir / "brackets"),
     )
-    outputs = generator.generate(bracket, season=args.season)
+    outputs = generator.generate(bracket, season=args.season, label_suffix=args.label)
     print("Bracket artifacts written:")
     for label, path in outputs.items():
         if path is None:

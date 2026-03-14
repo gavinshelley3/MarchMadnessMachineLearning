@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -11,7 +11,8 @@ from . import data_loading, dataset_builder
 from .config import get_config
 from .data_pipeline import load_and_build_dataset
 from .feature_metadata import available_feature_sets, select_diff_columns
-from .supplemental_ncaa import build_supplemental_features
+from .bracket_loader import extract_bracket_field, load_bracket_definition
+from .supplemental_ncaa import _normalize_name, build_supplemental_features
 from .train import prepare_features, run_logistic_regression_baseline
 from .utils import ensure_parent_dir, set_random_seed
 
@@ -26,6 +27,8 @@ CBBPY_OVERRIDE_MAP: Dict[str, str] = {
     "DefensiveRating": "CBBpy_DefRating",
     "NetRating": "CBBpy_NetRating",
 }
+
+DEFAULT_BRACKET_PATH = Path("data/brackets/projected_2026_bracket.json")
 
 
 def _load_optional_massey(data_dir: Path, system: str | None = None) -> pd.DataFrame | None:
@@ -76,6 +79,25 @@ def apply_cbbpy_overrides(context: pd.DataFrame, cbbpy_frame: pd.DataFrame | Non
     return merged
 
 
+def _load_allowed_team_ids(bracket_path: Path, teams_df: pd.DataFrame) -> Tuple[Set[int], List[str], int]:
+    bracket_def = load_bracket_definition(bracket_path)
+    field_slots = extract_bracket_field(bracket_def)
+    name_to_id = {
+        _normalize_name(str(row["TeamName"])): int(row["TeamID"])
+        for _, row in teams_df.iterrows()
+    }
+    allowed_ids: Set[int] = set()
+    missing: List[str] = []
+    for slot in field_slots:
+        normalized = _normalize_name(slot.team_key)
+        team_id = name_to_id.get(normalized)
+        if team_id is None:
+            missing.append(slot.team_key)
+            continue
+        allowed_ids.add(team_id)
+    return allowed_ids, missing, bracket_def.season
+
+
 def build_team_context(
     data_dir: Path,
     include_supplemental: bool,
@@ -111,11 +133,14 @@ def build_inference_matchups(
     context: pd.DataFrame,
     teams_df: pd.DataFrame,
     season: int,
+    allowed_team_ids: Optional[Set[int]] = None,
 ) -> pd.DataFrame:
     season_context = context[context["Season"] == season].copy()
     if season_context.empty:
         raise ValueError(f"No team context rows found for season {season}.")
     season_context = season_context.dropna(subset=["TeamID"])
+    if allowed_team_ids:
+        season_context = season_context[season_context["TeamID"].isin(list(allowed_team_ids))]
     if "Seed" in season_context.columns:
         seeded_only = season_context.dropna(subset=["Seed"])
         if not seeded_only.empty:
@@ -239,6 +264,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cbbpy-features", type=Path, default=None, help="Path to cached CBBpy features CSV.")
     parser.add_argument("--feature-set", choices=available_feature_sets(), default="core_plus_opponent_adjustment", help="Feature set to use for logistic regression.")
     parser.add_argument("--output", type=Path, default=Path("outputs/predictions/2026_matchup_predictions.csv"), help="Destination CSV for predictions.")
+    parser.add_argument(
+        "--field-only",
+        action="store_true",
+        help="Limit matchups to teams listed in the bracket file.",
+    )
+    parser.add_argument(
+        "--bracket-file",
+        type=Path,
+        default=None,
+        help="Bracket JSON used to derive the projected field (defaults to projected_2026 bracket).",
+    )
     parser.add_argument("--random-seed", type=int, default=42, help="Random seed for reproducibility.")
     return parser.parse_args()
 
@@ -250,6 +286,25 @@ def main() -> None:
     data_dir = args.data_dir if args.data_dir else config.paths.raw_data_dir
     supplemental_dir = args.supplemental_dir if args.supplemental_dir else config.paths.supplemental_ncaa_dir
     cbbpy_features_path = args.cbbpy_features if args.cbbpy_features else config.paths.cbbpy_cache_dir / f"cbbpy_team_features_{args.cbbpy_season}.csv"
+    teams_df = data_loading.load_teams(data_dir)
+    allowed_team_ids: Optional[Set[int]] = None
+    bracket_path = args.bracket_file if args.bracket_file else DEFAULT_BRACKET_PATH
+    if args.field_only:
+        if not bracket_path.exists():
+            raise SystemExit(f"Bracket file {bracket_path} not found but --field-only was requested.")
+        allowed_team_ids, missing_names, bracket_season = _load_allowed_team_ids(bracket_path, teams_df)
+        if bracket_season != args.season:
+            print(f"[predict_2026] Warning: bracket season {bracket_season} differs from inference season {args.season}.")
+        if missing_names:
+            print(
+                "[predict_2026] Warning: could not map the following bracket teams to TeamIDs:",
+                ", ".join(sorted(set(missing_names))),
+            )
+        print(
+            f"[predict_2026] Restricting predictions to {len(allowed_team_ids)} teams from {bracket_path.name}."
+        )
+        if not allowed_team_ids:
+            raise SystemExit("Bracket field mapping produced an empty team list. Verify team names.")
 
     dataset, _ = load_and_build_dataset(
         data_dir=data_dir,
@@ -271,8 +326,7 @@ def main() -> None:
         cbbpy_features=cbbpy_features_path,
         cbbpy_season=args.cbbpy_season,
     )
-    teams_df = data_loading.load_teams(data_dir)
-    inference_df = build_inference_matchups(context, teams_df, args.season)
+    inference_df = build_inference_matchups(context, teams_df, args.season, allowed_team_ids=allowed_team_ids)
     inference_df_with_label = inference_df.copy()
     inference_df_with_label["Label"] = 0
 

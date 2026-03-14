@@ -239,6 +239,7 @@ class BracketGenerator:
         self,
         bracket_def: BracketDefinition,
         season: Optional[int] = None,
+        label_suffix: Optional[str] = None,
     ) -> Dict[str, Path]:
         round_results, champion, lookup, unresolved_slots = self.compute_round_results(bracket_def, season)
         writer = _BracketWriter(
@@ -246,6 +247,7 @@ class BracketGenerator:
             bracket_definition=bracket_def,
             lookup=lookup,
             unresolved_slots=unresolved_slots,
+            label_suffix=label_suffix,
         )
         return writer.write(round_results, champion=champion)
 
@@ -350,6 +352,13 @@ class BracketGenerator:
         )
 
 
+def _sanitize_label(label: Optional[str]) -> str:
+    if not label:
+        return ""
+    slug = str(label).strip().lower().replace(" ", "_")
+    return f"_{slug}" if slug else ""
+
+
 class _BracketWriter:
     """Handles serialization of generated bracket artifacts."""
 
@@ -359,18 +368,21 @@ class _BracketWriter:
         bracket_definition: BracketDefinition,
         lookup: PredictionLookup,
         unresolved_slots: List[Dict[str, object]],
+        label_suffix: Optional[str] = None,
     ):
         self.output_dir = output_dir
         self.bracket_definition = bracket_definition
         self.lookup = lookup
         self.unresolved_slots = unresolved_slots
+        self.label_suffix = _sanitize_label(label_suffix)
 
     def write(self, rounds: Dict[str, List[GameResult]], champion: TeamState) -> Dict[str, Path]:
         prefix = f"{self.bracket_definition.season}_{self.bracket_definition.bracket_type}".replace(" ", "_").lower()
-        json_path = self.output_dir / f"{prefix}_bracket_results.json"
-        csv_path = self.output_dir / f"{prefix}_bracket_results.csv"
-        summary_path = self.output_dir / f"{prefix}_bracket_summary.txt"
-        upsets_path = self.output_dir / f"{prefix}_top_upsets.csv"
+        suffix = self.label_suffix
+        json_path = self.output_dir / f"{prefix}_bracket_results{suffix}.json"
+        csv_path = self.output_dir / f"{prefix}_bracket_results{suffix}.csv"
+        summary_path = self.output_dir / f"{prefix}_bracket_summary{suffix}.txt"
+        upsets_path = self.output_dir / f"{prefix}_top_upsets{suffix}.csv"
 
         json_payload = self._build_json(rounds, champion)
         _write_json(json_path, json_payload)
