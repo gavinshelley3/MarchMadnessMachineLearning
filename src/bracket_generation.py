@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
@@ -174,6 +174,12 @@ class PredictionLookup:
         return self._team_ids.get(team_name)
 
 
+SelectionPolicy = Callable[
+    [TeamState, TeamState, float, float, str, str, Optional[str]],
+    TeamState,
+]
+
+
 class BracketGenerator:
     """Deterministically generates a bracket using saved predictions."""
 
@@ -182,6 +188,7 @@ class BracketGenerator:
         predictions_path: Path,
         output_dir: Optional[Path] = None,
         ensure_dirs: bool = True,
+        selection_policy: Optional[SelectionPolicy] = None,
     ):
         self.predictions_path = predictions_path
         config = get_config()
@@ -189,20 +196,22 @@ class BracketGenerator:
         self.output_dir = output_dir or default_dir
         if ensure_dirs:
             Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        self.selection_policy = selection_policy
 
     def compute_round_results(
         self,
         bracket_def: BracketDefinition,
         season: Optional[int] = None,
+        lookup: Optional[PredictionLookup] = None,
     ) -> Tuple[Dict[str, List[GameResult]], TeamState, PredictionLookup, List[Dict[str, object]]]:
         season_to_use = season or bracket_def.season
-        lookup = PredictionLookup(self.predictions_path, season_to_use)
+        lookup_instance = lookup or PredictionLookup(self.predictions_path, season_to_use)
         round_results: Dict[str, List[GameResult]] = {name: [] for name, _ in ROUND_SEQUENCE}
         unresolved_slots = list(_collect_unresolved_slots(bracket_def))
         region_champions: Dict[str, TeamState] = {}
 
         for region in bracket_def.regions:
-            champion = self._run_region(region.name, region.round_of_64, lookup, round_results)
+            champion = self._run_region(region.name, region.round_of_64, lookup_instance, round_results)
             region_champions[region.name] = champion
 
         semifinal_winners: List[TeamState] = []
@@ -217,7 +226,7 @@ class BracketGenerator:
                 round_name="FinalFour",
                 slot=slot_name,
                 region="National",
-                lookup=lookup,
+                lookup=lookup_instance,
             )
             round_results["FinalFour"].append(result)
             semifinal_winners.append(result.winner)
@@ -230,22 +239,27 @@ class BracketGenerator:
             round_name="Championship",
             slot="Title",
             region="National",
-            lookup=lookup,
+            lookup=lookup_instance,
         )
         round_results["Championship"].append(championship)
-        return round_results, championship.winner, lookup, unresolved_slots
+        return round_results, championship.winner, lookup_instance, unresolved_slots
 
     def generate(
         self,
         bracket_def: BracketDefinition,
         season: Optional[int] = None,
+        label_suffix: Optional[str] = None,
+        lookup: Optional[PredictionLookup] = None,
     ) -> Dict[str, Path]:
-        round_results, champion, lookup, unresolved_slots = self.compute_round_results(bracket_def, season)
+        round_results, champion, lookup_instance, unresolved_slots = self.compute_round_results(
+            bracket_def, season, lookup=lookup
+        )
         writer = _BracketWriter(
             output_dir=self.output_dir,
             bracket_definition=bracket_def,
-            lookup=lookup,
+            lookup=lookup_instance,
             unresolved_slots=unresolved_slots,
+            label_suffix=label_suffix,
         )
         return writer.write(round_results, champion=champion)
 
@@ -333,10 +347,19 @@ class BracketGenerator:
         lookup: PredictionLookup,
     ) -> GameResult:
         prob_team1, prob_team2 = lookup.probability(team1.team_key, team2.team_key)
-        if prob_team1 >= prob_team2:
-            winner, loser = team1, team2
+        if self.selection_policy:
+            selected = self.selection_policy(team1, team2, prob_team1, prob_team2, round_name, slot, region)
+            if selected is team1:
+                winner, loser = team1, team2
+            elif selected is team2:
+                winner, loser = team2, team1
+            else:  # pragma: no cover - defensive guard
+                raise ValueError("Selection policy must return one of the provided teams.")
         else:
-            winner, loser = team2, team1
+            if prob_team1 >= prob_team2:
+                winner, loser = team1, team2
+            else:
+                winner, loser = team2, team1
         return GameResult(
             round_name=round_name,
             slot=slot,
@@ -350,6 +373,13 @@ class BracketGenerator:
         )
 
 
+def _sanitize_label(label: Optional[str]) -> str:
+    if not label:
+        return ""
+    slug = str(label).strip().lower().replace(" ", "_")
+    return f"_{slug}" if slug else ""
+
+
 class _BracketWriter:
     """Handles serialization of generated bracket artifacts."""
 
@@ -359,18 +389,21 @@ class _BracketWriter:
         bracket_definition: BracketDefinition,
         lookup: PredictionLookup,
         unresolved_slots: List[Dict[str, object]],
+        label_suffix: Optional[str] = None,
     ):
         self.output_dir = output_dir
         self.bracket_definition = bracket_definition
         self.lookup = lookup
         self.unresolved_slots = unresolved_slots
+        self.label_suffix = _sanitize_label(label_suffix)
 
     def write(self, rounds: Dict[str, List[GameResult]], champion: TeamState) -> Dict[str, Path]:
         prefix = f"{self.bracket_definition.season}_{self.bracket_definition.bracket_type}".replace(" ", "_").lower()
-        json_path = self.output_dir / f"{prefix}_bracket_results.json"
-        csv_path = self.output_dir / f"{prefix}_bracket_results.csv"
-        summary_path = self.output_dir / f"{prefix}_bracket_summary.txt"
-        upsets_path = self.output_dir / f"{prefix}_top_upsets.csv"
+        suffix = self.label_suffix
+        json_path = self.output_dir / f"{prefix}_bracket_results{suffix}.json"
+        csv_path = self.output_dir / f"{prefix}_bracket_results{suffix}.csv"
+        summary_path = self.output_dir / f"{prefix}_bracket_summary{suffix}.txt"
+        upsets_path = self.output_dir / f"{prefix}_top_upsets{suffix}.csv"
 
         json_payload = self._build_json(rounds, champion)
         _write_json(json_path, json_payload)
