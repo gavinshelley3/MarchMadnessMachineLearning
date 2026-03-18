@@ -79,6 +79,34 @@ def build_team_context_with_features(
     return context
 
 
+def _add_seed_context_features(dataset: pd.DataFrame) -> None:
+    """Augment dataset with seed-aware features and interactions."""
+
+    if "SeedNum" not in dataset:
+        return
+    seed = dataset["SeedNum"].astype(float).clip(lower=1.0)
+    dataset["SeedNumSquared"] = seed ** 2
+    dataset["SeedInverse"] = 1.0 / seed
+    dataset["SeedNormalized"] = (17.0 - seed) / 16.0
+    dataset["SeedTier_1"] = (seed == 1).astype(int)
+    dataset["SeedTier_2"] = (seed == 2).astype(int)
+    dataset["SeedTier_3_4"] = seed.between(3, 4).astype(int)
+    dataset["SeedTier_5_8"] = seed.between(5, 8).astype(int)
+    dataset["SeedTier_9_12"] = seed.between(9, 12).astype(int)
+    dataset["SeedTier_13_16"] = (seed >= 13).astype(int)
+    dataset["SeedPlayInFlag"] = (dataset["PlayInOffset"] > 0).astype(int)
+
+    def _maybe_interaction(column: str, target_name: str) -> None:
+        if column in dataset.columns:
+            dataset[target_name] = dataset[column].fillna(0.0) * dataset["SeedNormalized"]
+
+    _maybe_interaction("NetRating", "SeedNorm_x_NetRating")
+    _maybe_interaction("AdjustedScoringMargin", "SeedNorm_x_AdjustedMargin")
+    _maybe_interaction("Recent10OffRating", "SeedNorm_x_Recent10OffRating")
+    if "WinPercentage" in dataset.columns:
+        dataset["SeedTierTop8_x_WinPct"] = dataset["SeedTier_5_8"] * dataset["WinPercentage"].fillna(0.0)
+
+
 def build_advancement_dataset_from_frames(
     seeds: pd.DataFrame,
     tourney_results: pd.DataFrame,
@@ -108,6 +136,7 @@ def build_advancement_dataset_from_frames(
             dataset["Wins"] >= (dataset["PlayInOffset"] + required_wins)
         ).astype(int)
 
+    _add_seed_context_features(dataset)
     label_names = [label for label, _ in ADVANCEMENT_LABELS]
     excluded = {"Season", "TeamID", "TeamName", "Seed", "Wins", "PlayInOffset"} | set(label_names)
     feature_columns = [

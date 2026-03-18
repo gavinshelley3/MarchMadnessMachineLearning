@@ -53,6 +53,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-delta", type=float, default=0.0005, help="Minimum improvement for early stopping.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument(
+        "--artifact-suffix",
+        type=str,
+        default="",
+        help="Optional suffix appended to model/prediction artifact directories.",
+    )
+    parser.add_argument(
         "--reports-dir",
         type=Path,
         default=None,
@@ -183,6 +189,7 @@ def train_with_optimizer(
     args: argparse.Namespace,
     output_root: Path,
     predictions_dir: Path,
+    artifact_suffix: str = "",
 ) -> Dict[str, object]:
     set_random_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -240,6 +247,7 @@ def train_with_optimizer(
         val_df=val_df,
         predictions=y_pred,
         y_true=y_true,
+        artifact_suffix=artifact_suffix,
     )
     return {
         "optimizer": optimizer_name,
@@ -262,6 +270,7 @@ def save_artifacts(
     val_df: pd.DataFrame,
     predictions: np.ndarray,
     y_true: np.ndarray,
+    artifact_suffix: str = "",
 ) -> Dict[str, Path]:
     model_dir = output_root / optimizer_name
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -281,11 +290,13 @@ def save_artifacts(
         "max_epochs": args.max_epochs,
         "train_rows": train_rows,
         "val_rows": val_rows,
+        "artifact_suffix": artifact_suffix,
     }
     (model_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, default=_json_default), encoding="utf-8")
     (model_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, default=_json_default), encoding="utf-8")
 
-    preds_path = predictions_dir / f"advancement_validation_{optimizer_name}.csv"
+    suffix = f"_{artifact_suffix}" if artifact_suffix else ""
+    preds_path = predictions_dir / f"advancement_validation{suffix}_{optimizer_name}.csv"
     ensure_parent_dir(preds_path)
     preds_df = val_df[["Season", "TeamID", "TeamName", "Seed", "SeedNum"]].copy()
     for idx, label in enumerate(LABEL_NAMES):
@@ -298,6 +309,7 @@ def save_artifacts(
 def save_comparison_report(
     results: List[Dict[str, object]],
     reports_dir: Path,
+    artifact_suffix: str,
 ) -> None:
     reports_dir.mkdir(parents=True, exist_ok=True)
     comparison = {}
@@ -318,13 +330,14 @@ def save_comparison_report(
                     "accuracy": stats.get("accuracy"),
                 }
             )
-    (reports_dir / "advancement_optimizer_comparison.json").write_text(
+    suffix = f"_{artifact_suffix}" if artifact_suffix else ""
+    (reports_dir / f"advancement_optimizer_comparison{suffix}.json").write_text(
         json.dumps(comparison, indent=2, default=_json_default),
         encoding="utf-8",
     )
     if rows:
         pd.DataFrame(rows).to_csv(
-            reports_dir / "advancement_optimizer_comparison.csv",
+            reports_dir / f"advancement_optimizer_comparison{suffix}.csv",
             index=False,
         )
 
@@ -356,7 +369,9 @@ def main() -> None:
 
     optimizers = ["adam", "sgd"] if args.compare_optimizers else [args.optimizer]
     results: List[Dict[str, object]] = []
-    output_root = config.paths.models_dir / "advancement"
+    artifact_suffix = args.artifact_suffix.strip().replace(" ", "_")
+    suffix_label = f"_{artifact_suffix}" if artifact_suffix else ""
+    output_root = config.paths.models_dir / f"advancement{suffix_label}"
     predictions_dir = config.paths.outputs_dir / "predictions"
     for opt in optimizers:
         results.append(
@@ -373,9 +388,10 @@ def main() -> None:
                 args,
                 output_root,
                 predictions_dir,
+                artifact_suffix,
             )
         )
-    save_comparison_report(results, reports_dir)
+    save_comparison_report(results, reports_dir, artifact_suffix)
     print("Advancement training complete. Comparison report saved to", reports_dir)
 
 

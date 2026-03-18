@@ -13,9 +13,36 @@ def test_play_in_labels_are_offset() -> None:
     )
     context = pd.DataFrame(
         [
-            {"Season": 2020, "TeamID": 1, "SeedNum": 1, "MetricA": 5.0},
-            {"Season": 2020, "TeamID": 2, "SeedNum": 16, "MetricA": 1.0},
-            {"Season": 2020, "TeamID": 3, "SeedNum": 16, "MetricA": 0.5},
+            {
+                "Season": 2020,
+                "TeamID": 1,
+                "SeedNum": 1,
+                "MetricA": 5.0,
+                "NetRating": 20.0,
+                "AdjustedScoringMargin": 18.0,
+                "Recent10OffRating": 115.0,
+                "WinPercentage": 0.9,
+            },
+            {
+                "Season": 2020,
+                "TeamID": 2,
+                "SeedNum": 16,
+                "MetricA": 1.0,
+                "NetRating": -5.0,
+                "AdjustedScoringMargin": -8.0,
+                "Recent10OffRating": 95.0,
+                "WinPercentage": 0.6,
+            },
+            {
+                "Season": 2020,
+                "TeamID": 3,
+                "SeedNum": 16,
+                "MetricA": 0.5,
+                "NetRating": -7.0,
+                "AdjustedScoringMargin": -9.0,
+                "Recent10OffRating": 92.0,
+                "WinPercentage": 0.55,
+            },
         ]
     )
     teams = pd.DataFrame(
@@ -48,3 +75,6 @@ def test_play_in_labels_are_offset() -> None:
     top_seed_row = dataset.loc[dataset["TeamID"] == 1].iloc[0]
     assert top_seed_row["reached_round_of_32"] == 1
     assert top_seed_row["reached_sweet_16"] == 1
+    assert "SeedNormalized" in dataset.columns
+    assert "SeedTier_1" in dataset.columns
+    assert "SeedNorm_x_NetRating" in dataset.columns
