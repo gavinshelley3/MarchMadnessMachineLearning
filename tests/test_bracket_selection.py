@@ -3,6 +3,7 @@ from itertools import combinations
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from src.bracket_generation import BracketGenerator, TeamState
 from src.bracket_loader import load_bracket_definition
@@ -192,6 +193,8 @@ def test_run_selection_outputs(tmp_path: Path) -> None:
         baseline_weight=0.6,
         simulation_probabilities=None,
         advancement_probabilities=None,
+        use_calibrated_advancement=False,
+        calibrated_advancement_path=None,
         advancement_weight=0.3,
         label_suffix="final",
         output_dir=tmp_path / "final_brackets",
@@ -220,6 +223,8 @@ def test_run_selection_outputs(tmp_path: Path) -> None:
         baseline_weight=0.6,
         simulation_probabilities=sim_path,
         advancement_probabilities=adv_path,
+        use_calibrated_advancement=False,
+        calibrated_advancement_path=None,
         advancement_weight=0.25,
         label_suffix="adv",
         output_dir=tmp_path / "adv_brackets",
@@ -234,3 +239,26 @@ def test_run_selection_outputs(tmp_path: Path) -> None:
     )
     assert adv_result["outputs"]["json"].exists()
     assert (tmp_path / "adv_comparison.json").exists()
+
+
+def test_advancement_probabilities_load_and_stage(tmp_path: Path) -> None:
+    milestones = [
+        "round_of_32",
+        "sweet_16",
+        "elite_8",
+        "final_four",
+        "championship_game",
+        "champion",
+    ]
+    data = {
+        "team_key": ["teamA", "teamB"],
+    }
+    for m in milestones:
+        data[f"calibrated_prob_{m}"] = ["0.7", "0.3"]
+    df = pd.DataFrame(data)
+    csv_path = tmp_path / "adv_probs.csv"
+    df.to_csv(csv_path, index=False)
+    adv_probs = AdvancementProbabilities(csv_path)
+    for m in milestones:
+        prob = adv_probs.rows["teama"][f"calibrated_prob_{m}"]
+        assert 0 <= prob <= 1

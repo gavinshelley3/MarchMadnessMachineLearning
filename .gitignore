@@ -51,6 +51,7 @@ coverage.xml
 .pytest_cache/
 cover/
 tests_results.html
+.pytest-tmp/
 
 # Translations
 *.mo
@@ -222,3 +223,9 @@ data/current_season/*
 !data/current_season/.gitkeep
 outputs/*
 !outputs/.gitkeep
+tmp/
+pytest_workdir/
+.pytest-work/
+.pytest_work/
+.pytest-tmp/
+

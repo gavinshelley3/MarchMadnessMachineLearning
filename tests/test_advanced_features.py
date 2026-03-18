@@ -1,6 +1,12 @@
+from pathlib import Path
+
 import pandas as pd
+import pytest
 
 from src.feature_engineering import build_team_season_features
+from src.generate_advancement_probabilities_table import (
+    generate_advancement_probabilities_table,
+)
 
 
 def _base_rows():
@@ -85,3 +91,29 @@ def test_adjusted_margin_differs_from_raw():
     opponent = features[features["TeamID"] == 1002].iloc[0]
     assert team["AdjustedScoringMargin"] > opponent["AdjustedScoringMargin"]
     assert team["AdjustedScoringMargin"] != team["ScoringMargin"]
+
+
+def test_advancement_probabilities_table_html(tmp_path: Path) -> None:
+    milestones = [
+        "round_of_32",
+        "sweet_16",
+        "elite_8",
+        "final_four",
+        "championship_game",
+        "champion",
+    ]
+    data = {
+        "TeamName": ["TeamA", "TeamB"],
+        "Seed": [1, 16],
+    }
+    for m in milestones:
+        data[f"calibrated_prob_{m}"] = [0.8, 0.2]
+    df = pd.DataFrame(data)
+    csv_path = tmp_path / "calibrated.csv"
+    df.to_csv(csv_path, index=False)
+    html_path = tmp_path / "table.html"
+    output = generate_advancement_probabilities_table(csv_path, html_path)
+    contents = output.read_text(encoding="utf-8")
+    assert "<table" in contents
+    assert "TeamA" in contents
+    assert "calibrated_prob_round_of_32" in contents

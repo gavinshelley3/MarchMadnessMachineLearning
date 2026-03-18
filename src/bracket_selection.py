@@ -6,7 +6,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
@@ -96,10 +96,11 @@ class SimulationProbabilities:
         self.path = path
         self.rows: Dict[str, Dict[str, float]] = {}
         for record in df.to_dict(orient="records"):
-            key = _normalize_key(record.get("team_key") or record.get("team"))
-            if not key:
+            team_val = record.get("team_key") or record.get("team")
+            if not isinstance(team_val, str):
                 continue
-            self.rows[key] = {k: float(v) for k, v in record.items() if isinstance(v, (int, float))}
+            key = _normalize_key(team_val)
+            self.rows[key] = {str(k): float(v) for k, v in record.items() if isinstance(v, (int, float))}
 
     def stage_probability(self, team_key: str, round_name: str) -> Optional[float]:
         column = ROUND_STAGE_MAP.get(round_name)
@@ -125,10 +126,11 @@ class AdvancementProbabilities:
         self.path = path
         self.rows: Dict[str, Dict[str, float]] = {}
         for record in df.to_dict(orient="records"):
-            key = _normalize_key(record.get("team_key") or record.get("TeamName"))
-            if not key:
+            team_val = record.get("team_key") or record.get("TeamName")
+            if not isinstance(team_val, str):
                 continue
-            numeric_fields = {k: float(v) for k, v in record.items() if isinstance(v, (int, float))}
+            key = _normalize_key(team_val)
+            numeric_fields = {str(k): float(v) for k, v in record.items() if isinstance(v, (int, float))}
             self.rows[key] = numeric_fields
 
     def stage_probability(self, team_key: str, round_name: str) -> Optional[float]:
@@ -138,7 +140,12 @@ class AdvancementProbabilities:
         entry = self.rows.get(_normalize_key(team_key))
         if not entry:
             return None
-        return entry.get(column)
+        value = entry.get(column)
+        if value is not None:
+            return value
+        milestone = column.replace("_probability", "")
+        calibrated_key = f"calibrated_prob_{milestone}"
+        return entry.get(calibrated_key)
 
 
 class SimulationInformedPolicy:
@@ -262,19 +269,27 @@ class AdvancementInformedPolicy:
 
 
 def _summarize_bracket(bracket_payload: Dict[str, object]) -> Dict[str, object]:
-    rounds = bracket_payload.get("rounds", {})
+    rounds = bracket_payload["rounds"] if isinstance(bracket_payload, dict) and "rounds" in bracket_payload else {}
     winners = {}
-    for round_name, games in rounds.items():
-        for game in games:
-            slot = game.get("slot")
-            winner = (game.get("winner") or {}).get("display_name")
-            if slot and winner:
-                winners[(round_name, slot)] = winner
-    elite_round = rounds.get("Elite8", [])
-    final_four = sorted(
-        { (game.get("winner") or {}).get("display_name") for game in elite_round if (game.get("winner") or {}).get("display_name") }
-    )
-    champion = (bracket_payload.get("champion") or {}).get("display_name")
+    if isinstance(rounds, dict):
+        for round_name, games in rounds.items():
+            for game in games:
+                slot = game["slot"] if isinstance(game, dict) and "slot" in game else None
+                winner = game["winner"] if isinstance(game, dict) and "winner" in game else None
+                winner_name = winner["display_name"] if isinstance(winner, dict) and "display_name" in winner else None
+                if slot and winner_name:
+                    winners[(round_name, slot)] = winner_name
+        elite_round = rounds["Elite8"] if "Elite8" in rounds else []
+    else:
+        elite_round = []
+    final_four_set = set()
+    for game in elite_round:
+        winner = game["winner"] if isinstance(game, dict) and "winner" in game else None
+        winner_name = winner["display_name"] if isinstance(winner, dict) and "display_name" in winner else None
+        if winner_name:
+            final_four_set.add(winner_name)
+    final_four = sorted(list(final_four_set))
+    champion = bracket_payload["champion"]["display_name"] if isinstance(bracket_payload, dict) and "champion" in bracket_payload and isinstance(bracket_payload["champion"], dict) and "display_name" in bracket_payload["champion"] else None
     return {
         "winners": winners,
         "final_four": final_four,
@@ -283,9 +298,9 @@ def _summarize_bracket(bracket_payload: Dict[str, object]) -> Dict[str, object]:
 
 
 def _build_difference(report_a: Dict[str, object], report_b: Dict[str, object]) -> Dict[str, object]:
-    winners_a = report_a["winners"]
-    winners_b = report_b["winners"]
-    all_slots = sorted(set(winners_a) | set(winners_b))
+    winners_a = report_a["winners"] if isinstance(report_a["winners"], dict) else {}
+    winners_b = report_b["winners"] if isinstance(report_b["winners"], dict) else {}
+    all_slots = sorted(list(set(winners_a.keys()) | set(winners_b.keys())))
     changed = []
     for key in all_slots:
         pick_a = winners_a.get(key)
@@ -293,13 +308,15 @@ def _build_difference(report_a: Dict[str, object], report_b: Dict[str, object]) 
         if pick_a == pick_b:
             continue
         changed.append({"round": key[0], "slot": key[1], "reference": pick_a, "final": pick_b})
+    final_four_a = list(report_a["final_four"]) if isinstance(report_a["final_four"], (list, set)) else []
+    final_four_b = list(report_b["final_four"]) if isinstance(report_b["final_four"], (list, set)) else []
     return {
         "champion_changed": report_a["champion"] != report_b["champion"],
         "champion_reference": report_a["champion"],
         "champion_final": report_b["champion"],
-        "final_four_changed": sorted(report_a["final_four"]) != sorted(report_b["final_four"]),
-        "reference_final_four": report_a["final_four"],
-        "final_final_four": report_b["final_four"],
+        "final_four_changed": sorted(final_four_a) != sorted(final_four_b),
+        "reference_final_four": final_four_a,
+        "final_final_four": final_four_b,
         "slot_differences": changed,
         "total_changed_games": len(changed),
     }
@@ -364,6 +381,8 @@ def run_selection(
     baseline_weight: float,
     simulation_probabilities: Optional[Path],
     advancement_probabilities: Optional[Path],
+    use_calibrated_advancement: bool,
+    calibrated_advancement_path: Optional[Path],
     advancement_weight: float,
     label_suffix: Optional[str],
     output_dir: Path,
@@ -386,6 +405,7 @@ def run_selection(
     selection_policy = None
     predictions_path = baseline_predictions
     label = label_suffix or strategy
+    adv_source: Optional[Path] = advancement_probabilities
 
     if strategy == "baseline_deterministic":
         predictions_path = baseline_predictions
@@ -413,9 +433,24 @@ def run_selection(
                 stage_weight=simulation_weight,
             )
         elif strategy == "advancement_informed":
-            if not advancement_probabilities:
+            adv_source = advancement_probabilities
+            if use_calibrated_advancement:
+                candidate = calibrated_advancement_path or (
+                    Path(str(advancement_probabilities)) if advancement_probabilities else None
+                )
+                if candidate and candidate.suffix == ".csv":
+                    candidate = candidate if calibrated_advancement_path else Path(
+                        str(candidate).replace(".csv", "_calibrated.csv")
+                    )
+                if candidate and candidate.exists():
+                    adv_source = candidate
+                else:
+                    print(
+                        "[bracket_selection] Calibrated advancement file not found; falling back to raw probabilities."
+                    )
+            if not adv_source:
                 raise ValueError("Advancement probabilities are required for advancement_informed strategy.")
-            adv_probs = AdvancementProbabilities(advancement_probabilities)
+            adv_probs = AdvancementProbabilities(adv_source)
             sim_probs = SimulationProbabilities(simulation_probabilities) if simulation_probabilities else None
             selection_policy = AdvancementInformedPolicy(
                 advancement_probs=adv_probs,
@@ -446,10 +481,13 @@ def run_selection(
         "baseline_predictions": str(baseline_predictions),
         "enriched_predictions": str(enriched_predictions) if enriched_predictions else None,
         "simulation_probabilities": str(simulation_probabilities) if simulation_probabilities else None,
-        "baseline_weight": baseline_weight if strategy in {"blended_probabilities", "simulation_informed", "advancement_informed"} else None,
+        "baseline_weight": baseline_weight
+        if strategy in {"blended_probabilities", "simulation_informed", "advancement_informed"}
+        else None,
         "simulation_weight": simulation_weight if strategy in {"simulation_informed", "advancement_informed"} else None,
-        "advancement_probabilities": str(advancement_probabilities) if strategy == "advancement_informed" else None,
+        "advancement_probabilities": str(adv_source) if strategy == "advancement_informed" else None,
         "advancement_weight": advancement_weight if strategy == "advancement_informed" else None,
+        "use_calibrated_advancement": use_calibrated_advancement if strategy == "advancement_informed" else None,
     }
     _write_comparison_summary(
         final_payload,
@@ -604,6 +642,8 @@ def parse_args() -> argparse.Namespace:
         help="Skip HTML rendering.",
     )
     parser.set_defaults(render_html=True)
+    parser.add_argument("--use-calibrated-advancement", action="store_true", help="Use calibrated advancement probabilities if available.")
+    parser.add_argument("--calibrated-advancement-path", type=Path, default=None, help="Path to calibrated advancement probabilities CSV.")
     return parser.parse_args()
 
 
@@ -618,6 +658,8 @@ def main() -> None:
         baseline_weight=args.baseline_weight,
         simulation_probabilities=args.simulation_probabilities,
         advancement_probabilities=args.advancement_probabilities,
+        use_calibrated_advancement=args.use_calibrated_advancement,
+        calibrated_advancement_path=args.calibrated_advancement_path,
         advancement_weight=args.advancement_weight,
         label_suffix=args.label,
         output_dir=args.output_dir,

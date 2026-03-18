@@ -12,6 +12,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 import torch
+import pickle
 
 from .advancement_dataset import ADVANCEMENT_LABELS, build_team_context_with_features
 from .bracket_generation import PredictionLookup
@@ -37,7 +38,15 @@ ROUND_COLUMN_MAP = {
     "reached_championship_game": "championship_game_probability",
     "won_championship": "champion_probability",
 }
-
+MILESTONES = [
+    "round_of_32",
+    "sweet_16",
+    "elite_8",
+    "final_four",
+    "championship_game",
+    "champion",
+]
+CALIBRATOR_DIR = Path("outputs/models/advancement/calibrators/")
 
 @dataclass(frozen=True)
 class FieldEntry:
@@ -74,11 +83,12 @@ def collect_field_entries(
     team_map = {
         _normalize_name(str(row.TeamName)): int(row.TeamID)
         for row in teams_df.itertuples(index=False)
-        if pd.notna(row.TeamName)
+        if pd.notna(row.TeamName) and isinstance(row.TeamID, (int, np.integer))
     }
     id_to_name = {
         int(row.TeamID): str(row.TeamName)
         for row in teams_df.itertuples(index=False)
+        if isinstance(row.TeamID, (int, np.integer))
     }
     resolved: Dict[int, FieldEntry] = {}
     missing: List[str] = []
@@ -225,8 +235,9 @@ def _load_feature_columns(feature_path: Path) -> List[str]:
 
 def _fill_with_scaler_means(df: pd.DataFrame, feature_cols: List[str], scaler: object) -> pd.DataFrame:
     values = df[feature_cols].copy()
-    if hasattr(scaler, "mean_") and isinstance(scaler.mean_, np.ndarray):
-        means = pd.Series(scaler.mean_, index=feature_cols)
+    mean_attr = getattr(scaler, "mean_", None)
+    if mean_attr is not None and isinstance(mean_attr, np.ndarray):
+        means = pd.Series(mean_attr, index=feature_cols)
         values = values.fillna(means)
     else:
         values = values.fillna(0.0)
@@ -301,24 +312,52 @@ def run_inference(args: argparse.Namespace) -> Dict[str, object]:
         logits = model(torch.tensor(transformed, dtype=torch.float32, device=device))
         probabilities = torch.sigmoid(logits).cpu().numpy()
 
+    calibrators = {}
+    if getattr(args, "use_calibration", False):
+        calibrators = load_calibrators(getattr(args, "calibration_method", "isotonic"))
+
     output_df = feature_frame[
         ["season", "team_id", "team_name", "team_key", "bracket_display", "region", "seed"]
     ].copy()
     for idx, label in enumerate(LABEL_NAMES):
         column = ROUND_COLUMN_MAP[label]
         output_df[column] = probabilities[:, idx]
+
+    calibrated_csv: Optional[Path] = None
+    if calibrators:
+        for i in range(len(output_df)):
+            raw_probs = {
+                milestone: output_df.loc[i, ROUND_COLUMN_MAP[f"reached_{milestone}"]]
+                for milestone in MILESTONES
+            }
+            float_probs = {k: float(v.item() if hasattr(v, "item") else v) for k, v in raw_probs.items()}
+            calib_probs = apply_calibration(
+                calibrators,
+                float_probs,
+                getattr(args, "calibration_method", "isotonic"),
+            )
+            for milestone in MILESTONES:
+                output_df.loc[i, f"calibrated_prob_{milestone}"] = calib_probs[milestone]
+        calibrated_csv = Path(str(args.output_csv).replace(".csv", "_calibrated.csv"))
+
     output_df = output_df.rename(
         columns={
             "season": "Season",
             "team_id": "TeamID",
             "team_name": "TeamName",
+            "team_key": "TeamKey",
             "bracket_display": "BracketName",
+            "region": "Region",
             "seed": "Seed",
         }
     )
-    output_df = output_df.sort_values(["region", "Seed"]).reset_index(drop=True)
+    output_df = output_df.sort_values(["Region", "Seed"]).reset_index(drop=True)
     ensure_parent_dir(args.output_csv)
     output_df.to_csv(args.output_csv, index=False)
+    if calibrated_csv:
+        ensure_parent_dir(calibrated_csv)
+        output_df.to_csv(calibrated_csv, index=False)
+        print(f"[advancement_inference] Saved calibrated probabilities to {calibrated_csv}")
 
     missing_features = output_df.loc[
         raw_values.isna().any(axis=1), ["TeamName", "TeamID"]
@@ -334,17 +373,44 @@ def run_inference(args: argparse.Namespace) -> Dict[str, object]:
         "bracket_file": str(args.bracket_file),
         "baseline_predictions": str(args.baseline_predictions),
         "output_csv": str(args.output_csv),
+        "calibrated_output_csv": str(calibrated_csv) if calibrated_csv else None,
     }
     ensure_parent_dir(args.summary_json)
     args.summary_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return summary
 
 
+def load_calibrators(method: str = "isotonic") -> Dict[str, object]:
+    calibrators = {}
+    for milestone in MILESTONES:
+        path = CALIBRATOR_DIR / f"{milestone}_{method}.pkl"
+        if path.exists():
+            with open(path, "rb") as f:
+                calibrators[milestone] = pickle.load(f)
+    return calibrators
+
+def apply_calibration(calibrators: Dict[str, object], probs: Dict[str, float], method: str = "isotonic") -> Dict[str, float]:
+    calibrated = {}
+    for milestone in MILESTONES:
+        raw = float(probs[milestone])
+        calibrator = calibrators.get(milestone)
+        if calibrator is not None:
+            if method == "isotonic" and hasattr(calibrator, "transform") and callable(getattr(calibrator, "transform", None)):
+                calibrated[milestone] = float(calibrator.transform([raw])[0])
+            elif method == "platt" and hasattr(calibrator, "predict_proba") and callable(getattr(calibrator, "predict_proba", None)):
+                calibrated[milestone] = float(calibrator.predict_proba(np.array([[raw]]))[:, 1][0])
+            else:
+                calibrated[milestone] = raw
+        else:
+            calibrated[milestone] = raw
+    return calibrated
+
+
 def parse_args() -> argparse.Namespace:
     config = get_config()
     outputs_dir = config.paths.outputs_dir
     predictions_dir = outputs_dir / "predictions"
-    brackets_dir = outputs_dir / "brackets"
+    # brackets_dir = outputs_dir / "brackets"  # Unused variable removed
     parser = argparse.ArgumentParser(description="Infer advancement probabilities for the projected tournament field.")
     parser.add_argument("--season", type=int, default=2026, help="Tournament season to infer.")
     parser.add_argument("--data-dir", type=Path, default=config.paths.raw_data_dir, help="Root Kaggle data directory.")
@@ -407,6 +473,8 @@ def parse_args() -> argparse.Namespace:
         help="Where to write the inference summary JSON.",
     )
     parser.add_argument("--cpu-only", action="store_true", help="Force CPU inference even if CUDA is available.")
+    parser.add_argument("--use-calibration", action="store_true", help="Apply probability calibration if calibrators exist.")
+    parser.add_argument("--calibration-method", choices=["isotonic", "platt"], default="isotonic")
     return parser.parse_args()
 
 

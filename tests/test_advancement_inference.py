@@ -1,9 +1,22 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pytest
 
-from src.advancement_inference import _build_seed_frame, collect_field_entries
-from src.bracket_loader import BracketDefinition, FinalFourPairing, MatchupSlot, RegionDefinition, TeamSlot
+from src.advancement_inference import (
+    _build_seed_frame,
+    apply_calibration,
+    collect_field_entries,
+    load_calibrators,
+)
+from src.bracket_loader import (
+    BracketDefinition,
+    FinalFourPairing,
+    MatchupSlot,
+    RegionDefinition,
+    TeamSlot,
+)
 
 
 class _FakeLookup:
@@ -12,6 +25,53 @@ class _FakeLookup:
 
     def team_id(self, name: str) -> int | None:
         return self.mapping.get(name)
+
+@pytest.fixture
+def dummy_calibrators(tmp_path):
+    # Create dummy calibrators for each milestone
+    import pickle
+    from sklearn.isotonic import IsotonicRegression
+    milestones = [
+        "round_of_32",
+        "sweet_16",
+        "elite_8",
+        "final_four",
+        "championship_game",
+        "champion",
+    ]
+    calibrators = {}
+    for m in milestones:
+        calibrator = IsotonicRegression(out_of_bounds="clip")
+        calibrator.fit([0, 1], [0, 1])  # identity
+        pkl_path = tmp_path / f"{m}_isotonic.pkl"
+        with open(pkl_path, "wb") as f:
+            pickle.dump(calibrator, f)
+        calibrators[m] = calibrator
+    return tmp_path, calibrators
+
+
+def test_load_calibrators(dummy_calibrators, monkeypatch):
+    tmp_path, _ = dummy_calibrators
+    import src.advancement_inference as ai
+
+    monkeypatch.setattr(ai, "CALIBRATOR_DIR", tmp_path)
+    loaded = ai.load_calibrators(method="isotonic")
+    assert set(loaded.keys()) == set([
+        "round_of_32",
+        "sweet_16",
+        "elite_8",
+        "final_four",
+        "championship_game",
+        "champion",
+    ])
+
+
+def test_apply_calibration(dummy_calibrators):
+    _, calibrators = dummy_calibrators
+    probs = {m: 0.5 for m in calibrators.keys()}
+    calibrated = apply_calibration(calibrators, probs, method="isotonic")
+    for v in calibrated.values():
+        assert 0 <= v <= 1
 
 
 def _build_bracket_definition() -> BracketDefinition:

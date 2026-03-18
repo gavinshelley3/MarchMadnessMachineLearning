@@ -16,6 +16,19 @@ from . import data_loading
 from .data_loading import _resolve_path
 from .supplemental_ncaa import _normalize_name
 
+_config = get_config()
+_cbbpy_log_dir = _config.paths.current_season_dir / "cbbpy_logs"
+_cbbpy_log_dir.mkdir(parents=True, exist_ok=True)
+try:  # pragma: no cover - optional dependency tweak
+    import platformdirs
+
+    def _safe_user_log_dir(*args, **kwargs):
+        return str(_cbbpy_log_dir)
+
+    platformdirs.user_log_dir = _safe_user_log_dir  # type: ignore[attr-defined]
+except Exception:  # pragma: no cover - fall back if platformdirs missing
+    pass
+
 try:  # pragma: no cover - import failure is handled at runtime
     import cbbpy.mens_scraper as mens_scraper
 except ImportError:  # pragma: no cover - handled in CLI
