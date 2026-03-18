@@ -47,6 +47,7 @@ MILESTONES = [
     "champion",
 ]
 CALIBRATOR_DIR = Path("outputs/models/advancement/calibrators/")
+CALIBRATION_METADATA = CALIBRATOR_DIR / "calibration_metadata.json"
 
 
 def _label_name_for_milestone(milestone: str) -> str:
@@ -318,9 +319,13 @@ def run_inference(args: argparse.Namespace) -> Dict[str, object]:
         logits = model(torch.tensor(transformed, dtype=torch.float32, device=device))
         probabilities = torch.sigmoid(logits).cpu().numpy()
 
-    calibrators = {}
+    calibrators: Dict[str, Dict[str, object]] = {}
+    calibration_meta: Optional[Dict[str, Any]] = None
     if getattr(args, "use_calibration", False):
-        calibrators = load_calibrators(getattr(args, "calibration_method", "isotonic"))
+        calibrators, calibration_meta = load_calibrators(
+            metadata_path=getattr(args, "calibration_config", CALIBRATION_METADATA),
+            fallback_method=getattr(args, "calibration_method", "isotonic"),
+        )
 
     output_df = feature_frame[
         ["season", "team_id", "team_name", "team_key", "bracket_display", "region", "seed"]
@@ -337,11 +342,7 @@ def run_inference(args: argparse.Namespace) -> Dict[str, object]:
                 for milestone in MILESTONES
             }
             float_probs = {k: float(v.item() if hasattr(v, "item") else v) for k, v in raw_probs.items()}
-            calib_probs = apply_calibration(
-                calibrators,
-                float_probs,
-                getattr(args, "calibration_method", "isotonic"),
-            )
+            calib_probs = apply_calibration(calibrators, float_probs)
             for milestone in MILESTONES:
                 output_df.loc[i, f"calibrated_prob_{milestone}"] = calib_probs[milestone]
         calibrated_csv = Path(str(args.output_csv).replace(".csv", "_calibrated.csv"))
@@ -380,35 +381,78 @@ def run_inference(args: argparse.Namespace) -> Dict[str, object]:
         "baseline_predictions": str(args.baseline_predictions),
         "output_csv": str(args.output_csv),
         "calibrated_output_csv": str(calibrated_csv) if calibrated_csv else None,
+        "calibration_metadata": str(getattr(args, "calibration_config", CALIBRATION_METADATA))
+        if calibration_meta
+        else None,
+        "calibration_methods": {
+            milestone: calibrators[milestone]["method"]
+            for milestone in calibrators
+        }
+        if calibrators
+        else None,
     }
     ensure_parent_dir(args.summary_json)
     args.summary_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return summary
 
 
-def load_calibrators(method: str = "isotonic") -> Dict[str, object]:
-    calibrators = {}
-    for milestone in MILESTONES:
-        path = CALIBRATOR_DIR / f"{milestone}_{method}.pkl"
-        if path.exists():
-            with open(path, "rb") as f:
-                calibrators[milestone] = pickle.load(f)
-    return calibrators
+def load_calibrators(
+    metadata_path: Optional[Path],
+    fallback_method: str = "isotonic",
+) -> Tuple[Dict[str, Dict[str, object]], Optional[Dict[str, Any]]]:
+    calibrators: Dict[str, Dict[str, object]] = {}
+    metadata: Optional[Dict[str, Any]] = None
+    path = Path(metadata_path) if metadata_path else None
+    if path and path.exists():
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+        for milestone, entry in metadata.get("milestones", {}).items():
+            cal_path = Path(entry["calibrator_path"])
+            if not cal_path.exists():
+                continue
+            with open(cal_path, "rb") as f:
+                model = pickle.load(f)
+            calibrators[milestone] = {
+                "model": model,
+                "method": entry.get("method", fallback_method),
+                "blend_applied": entry.get("blend_applied", False),
+                "blend_weight": entry.get("blend_weight"),
+            }
+        return calibrators, metadata
 
-def apply_calibration(calibrators: Dict[str, object], probs: Dict[str, float], method: str = "isotonic") -> Dict[str, float]:
-    calibrated = {}
+    for milestone in MILESTONES:
+        fallback_path = CALIBRATOR_DIR / f"{milestone}_{fallback_method}.pkl"
+        if fallback_path.exists():
+            with open(fallback_path, "rb") as f:
+                model = pickle.load(f)
+            calibrators[milestone] = {
+                "model": model,
+                "method": fallback_method,
+                "blend_applied": False,
+                "blend_weight": None,
+            }
+    return calibrators, metadata
+
+
+def apply_calibration(calibrators: Dict[str, Dict[str, object]], probs: Dict[str, float]) -> Dict[str, float]:
+    calibrated: Dict[str, float] = {}
     for milestone in MILESTONES:
         raw = float(probs[milestone])
-        calibrator = calibrators.get(milestone)
-        if calibrator is not None:
-            if method == "isotonic" and hasattr(calibrator, "transform") and callable(getattr(calibrator, "transform", None)):
-                calibrated[milestone] = float(calibrator.transform([raw])[0])
-            elif method == "platt" and hasattr(calibrator, "predict_proba") and callable(getattr(calibrator, "predict_proba", None)):
-                calibrated[milestone] = float(calibrator.predict_proba(np.array([[raw]]))[:, 1][0])
-            else:
-                calibrated[milestone] = raw
-        else:
+        entry = calibrators.get(milestone)
+        if not entry:
             calibrated[milestone] = raw
+            continue
+        method = entry.get("method", "isotonic")
+        calibrator = entry.get("model")
+        if method == "isotonic" and hasattr(calibrator, "transform"):
+            value = float(calibrator.transform([raw])[0])
+        elif method == "platt" and hasattr(calibrator, "predict_proba"):
+            value = float(calibrator.predict_proba(np.array([[raw]]))[:, 1][0])
+        else:
+            value = raw
+        if entry.get("blend_applied") and entry.get("blend_weight") is not None:
+            weight = float(entry["blend_weight"])
+            value = weight * raw + (1.0 - weight) * value
+        calibrated[milestone] = value
     return calibrated
 
 
@@ -480,7 +524,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--cpu-only", action="store_true", help="Force CPU inference even if CUDA is available.")
     parser.add_argument("--use-calibration", action="store_true", help="Apply probability calibration if calibrators exist.")
-    parser.add_argument("--calibration-method", choices=["isotonic", "platt"], default="isotonic")
+    parser.add_argument(
+        "--calibration-config",
+        type=Path,
+        default=CALIBRATION_METADATA,
+        help="Path to calibration metadata JSON. Falls back to --calibration-method if missing.",
+    )
+    parser.add_argument(
+        "--calibration-method",
+        choices=["isotonic", "platt"],
+        default="isotonic",
+        help="Fallback calibrator type when metadata is absent.",
+    )
     return parser.parse_args()
 
 

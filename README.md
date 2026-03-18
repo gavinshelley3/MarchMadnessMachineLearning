@@ -287,6 +287,13 @@ In addition to the matchup classifier, the repo now contains a team-level advanc
      --sgd-momentum 0.9 \
      --include-supplemental-kaggle
    ```
+3. Calibrate the validation predictions with the stage-specific strategy (auto-picks isotonic for early rounds and Platt for sparse rounds, with safety fallbacks):
+   ```bash
+   python -m src.advancement_calibration \
+     --predictions outputs/predictions/advancement_validation_predictions.csv \
+     --strategy auto
+   ```
+   This writes per-milestone calibrators, `outputs/reports/advancement_calibration_report.json`, a detailed diagnostics file at `outputs/reports/advancement_calibration_diagnostics.json`, and metadata under `outputs/models/advancement/calibrators/calibration_metadata.json` so inference can see which method/blend was used.
 
 Artifacts:
 - Processed dataset: `data/processed/advancement_dataset.csv`
@@ -326,6 +333,8 @@ The advancement NN now plugs into the bracket workflow as a transparent tie-brea
    The `advancement_informed` strategy blends baseline/enriched matchup odds, consults Monte Carlo advancement rates when available, and tilts close calls using the NN’s team-level probabilities. Outputs still land under `outputs/brackets/` (JSON/CSV/txt), the rendered HTML view (default `outputs/final_report/bracket_view_final.html`), and a comparison report (for example `outputs/reports/advancement_bracket_comparison.json`), making it easy to see how the new signal changed Final Four and champion picks.
 
 Both commands remain bracket-file driven, so swapping in the official bracket JSON automatically reuses the same inference + selection flow without touching code.
+
+> **Calibration transparency:** the inference summary (`outputs/reports/advancement_inference_summary.json`) records which calibration metadata file and per-milestone methods were used, ensuring the advancement-informed bracket always references a reproducible calibration strategy.
 
 ## Testing & CI
 

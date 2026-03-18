@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -5,6 +6,7 @@ import pandas as pd
 import pytest
 
 from src.advancement_inference import (
+    MILESTONES,
     _build_seed_frame,
     apply_calibration,
     collect_field_entries,
@@ -26,52 +28,78 @@ class _FakeLookup:
     def team_id(self, name: str) -> int | None:
         return self.mapping.get(name)
 
+
 @pytest.fixture
-def dummy_calibrators(tmp_path):
-    # Create dummy calibrators for each milestone
+def dummy_calibration_metadata(tmp_path):
+    # Create dummy calibrators plus metadata for each milestone.
     import pickle
     from sklearn.isotonic import IsotonicRegression
-    milestones = [
-        "round_of_32",
-        "sweet_16",
-        "elite_8",
-        "final_four",
-        "championship_game",
-        "champion",
-    ]
+
+    metadata = {"milestones": {}}
     calibrators = {}
-    for m in milestones:
+    for milestone in MILESTONES:
         calibrator = IsotonicRegression(out_of_bounds="clip")
-        calibrator.fit([0, 1], [0, 1])  # identity
-        pkl_path = tmp_path / f"{m}_isotonic.pkl"
+        calibrator.fit([0, 1], [0, 1])  # identity transformation
+        pkl_path = tmp_path / f"{milestone}_isotonic.pkl"
         with open(pkl_path, "wb") as f:
             pickle.dump(calibrator, f)
-        calibrators[m] = calibrator
-    return tmp_path, calibrators
+        metadata["milestones"][milestone] = {
+            "calibrator_path": str(pkl_path),
+            "method": "isotonic",
+            "blend_applied": False,
+            "blend_weight": None,
+        }
+        calibrators[milestone] = {
+            "model": calibrator,
+            "method": "isotonic",
+            "blend_applied": False,
+            "blend_weight": None,
+        }
+    metadata_path = tmp_path / "calibration_metadata.json"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    return tmp_path, metadata_path, calibrators
 
 
-def test_load_calibrators(dummy_calibrators, monkeypatch):
-    tmp_path, _ = dummy_calibrators
+def test_load_calibrators(dummy_calibration_metadata, monkeypatch):
+    tmp_path, metadata_path, _ = dummy_calibration_metadata
     import src.advancement_inference as ai
 
     monkeypatch.setattr(ai, "CALIBRATOR_DIR", tmp_path)
-    loaded = ai.load_calibrators(method="isotonic")
-    assert set(loaded.keys()) == set([
-        "round_of_32",
-        "sweet_16",
-        "elite_8",
-        "final_four",
-        "championship_game",
-        "champion",
-    ])
+    calibrators, metadata = ai.load_calibrators(metadata_path, fallback_method="isotonic")
+    assert metadata is not None
+    assert set(calibrators.keys()) == set(MILESTONES)
+    assert all(entry["method"] == "isotonic" for entry in calibrators.values())
 
 
-def test_apply_calibration(dummy_calibrators):
-    _, calibrators = dummy_calibrators
-    probs = {m: 0.5 for m in calibrators.keys()}
-    calibrated = apply_calibration(calibrators, probs, method="isotonic")
-    for v in calibrated.values():
-        assert 0 <= v <= 1
+def test_apply_calibration(dummy_calibration_metadata):
+    _, _, calibrators = dummy_calibration_metadata
+    probs = {milestone: 0.5 for milestone in MILESTONES}
+    calibrated = apply_calibration(calibrators, probs)
+    for value in calibrated.values():
+        assert 0 <= value <= 1
+
+
+def test_apply_calibration_blend_fallback():
+    class _ZeroCalibrator:
+        def transform(self, arr):
+            return np.zeros_like(arr)
+
+    calibrators = {
+        "champion": {
+            "model": _ZeroCalibrator(),
+            "method": "isotonic",
+            "blend_applied": True,
+            "blend_weight": 0.5,
+        }
+    }
+    for milestone in MILESTONES:
+        calibrators.setdefault(
+            milestone,
+            {"model": _ZeroCalibrator(), "method": "isotonic", "blend_applied": False, "blend_weight": None},
+        )
+    raw_probs = {milestone: 0.6 for milestone in MILESTONES}
+    blended = apply_calibration(calibrators, raw_probs)
+    assert blended["champion"] == pytest.approx(0.3)
 
 
 def _build_bracket_definition() -> BracketDefinition:
@@ -90,7 +118,10 @@ def _build_bracket_definition() -> BracketDefinition:
             team_key="Beta_11",
             display_name="Beta Eleven",
             seed=11,
-            options=[{"team_key": "Beta_11", "display_name": "Beta Eleven"}, {"team_key": "Gamma", "display_name": "Gamma"}],
+            options=[
+                {"team_key": "Beta_11", "display_name": "Beta Eleven"},
+                {"team_key": "Gamma", "display_name": "Gamma"},
+            ],
         ),
         team2=TeamSlot(team_key="Beta_6", display_name="Beta Six", seed=6),
     )
