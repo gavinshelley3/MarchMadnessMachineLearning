@@ -133,6 +133,7 @@ class BracketSimulator:
         n_sims: int = 5000,
         seed: int = 123,
         output_dir: Optional[Path] = None,
+        label_suffix: Optional[str] = None,
     ):
         self.bracket_def = bracket_def
         self.predictions_path = predictions_path
@@ -140,6 +141,7 @@ class BracketSimulator:
         self.seed = seed
         self.config = get_config()
         self.output_dir = output_dir or (self.config.paths.outputs_dir / "brackets")
+        self._label_suffix = _sanitize_label(label_suffix)
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
 
         self.lookup = PredictionLookup(predictions_path, bracket_def.season)
@@ -331,6 +333,8 @@ class BracketSimulator:
         deterministic_results: Tuple[Dict[str, List[GameResult]], TeamState, PredictionLookup, List[Dict[str, object]]],
     ) -> SimulationPaths:
         prefix = f"{self.bracket_def.season}_{self.bracket_def.bracket_type}".replace(" ", "_").lower()
+        if self._label_suffix:
+            prefix = f"{prefix}{self._label_suffix}"
         probabilities_path = self.output_dir / f"{prefix}_simulation_team_probabilities.csv"
         summary_path = self.output_dir / f"{prefix}_simulation_summary.json"
         confidence_path = self.output_dir / f"{prefix}_pick_confidence.csv"
@@ -360,6 +364,13 @@ class BracketSimulator:
             confidence=confidence_path,
             upset_report=upset_path,
         )
+
+
+def _sanitize_label(label: Optional[str]) -> str:
+    if not label:
+        return ""
+    slug = str(label).strip().lower().replace(" ", "_")
+    return f"_{slug}" if slug else ""
 
 
 def classify_confidence(probability: float) -> str:

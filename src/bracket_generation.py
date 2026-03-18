@@ -9,6 +9,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
+from . import data_loading
 from .bracket_loader import BracketDefinition, MatchupSlot, TeamSlot, describe_bracket
 from .config import get_config
 
@@ -115,6 +116,7 @@ class PredictionLookup:
     def __init__(self, predictions_path: Path, season: int):
         self.predictions_path = predictions_path
         self.season = season
+        self._lookup_by_ids: Dict[Tuple[int, int], Tuple[float, float]] = {}
         usecols = [
             "Season",
             "Team1Name",
@@ -132,6 +134,7 @@ class PredictionLookup:
             raise ValueError(
                 f"No predictions for season {season} were found in {predictions_path}."
             )
+        self._normalized_name_lookup = _build_team_name_lookup()
         self.model_names = _sorted_unique(season_df["model_name"])
         self.feature_sets = _sorted_unique(season_df["feature_set"])
         self._lookup: Dict[Tuple[str, str], Tuple[float, float]] = {}
@@ -151,6 +154,15 @@ class PredictionLookup:
             self._lookup[key] = (p1, p2)
             self._team_ids.setdefault(str(row.Team1Name), _safe_int(row.Team1ID))
             self._team_ids.setdefault(str(row.Team2Name), _safe_int(row.Team2ID))
+            team1_id = _safe_int(row.Team1ID)
+            team2_id = _safe_int(row.Team2ID)
+            if team1_id is not None and team2_id is not None:
+                self._lookup_by_ids[(team1_id, team2_id)] = (p1, p2)
+                self._lookup_by_ids[(team2_id, team1_id)] = (p2, p1)
+                norm1 = _normalize_name(str(row.Team1Name))
+                norm2 = _normalize_name(str(row.Team2Name))
+                self._normalized_name_lookup.setdefault(norm1, team1_id)
+                self._normalized_name_lookup.setdefault(norm2, team2_id)
 
     @property
     def primary_model(self) -> str:
@@ -168,10 +180,28 @@ class PredictionLookup:
         if reverse_key in self._lookup:
             p_b, p_a = self._lookup[reverse_key]
             return p_a, p_b
+        id_a = self._resolve_team_id(team_a)
+        id_b = self._resolve_team_id(team_b)
+        if id_a is not None and id_b is not None:
+            lookup_key = (id_a, id_b)
+            if lookup_key in self._lookup_by_ids:
+                return self._lookup_by_ids[lookup_key]
         raise KeyError(f"No prediction entry for matchup {team_a} vs {team_b}.")
 
     def team_id(self, team_name: str) -> Optional[int]:
-        return self._team_ids.get(team_name)
+        existing = self._team_ids.get(team_name)
+        if existing is not None:
+            return existing
+        return self._resolve_team_id(team_name)
+
+    def _resolve_team_id(self, team_name: str) -> Optional[int]:
+        if not team_name:
+            return None
+        direct = self._team_ids.get(team_name)
+        if direct is not None:
+            return direct
+        normalized = _normalize_name(team_name)
+        return self._normalized_name_lookup.get(normalized)
 
 
 SelectionPolicy = Callable[
@@ -515,6 +545,46 @@ def _collect_unresolved_slots(bracket: BracketDefinition) -> Iterable[Dict[str, 
                     "team_key": team_slot.team_key,
                     "options": team_slot.options,
                 }
+
+
+NAME_ALIASES = {
+    "cabaptist": "calbaptist",
+    "ohiostate": "ohiost",
+    "miami": "miamifl",
+    "mcneese": "mcneesest",
+    "iowastate": "iowast",
+    "utahstate": "utahst",
+    "saintmarys": "stmarysca",
+    "saintlouis": "stlouis",
+    "longisland": "liubrooklyn",
+    "queens": "queensnc",
+    "kennesawst": "kennesaw",
+    "uconn": "connecticut",
+}
+
+
+def _normalize_name(value: str) -> str:
+    normalized = "".join(ch.lower() for ch in str(value) if ch.isalnum())
+    return NAME_ALIASES.get(normalized, normalized)
+
+
+def _build_team_name_lookup() -> Dict[str, int]:
+    lookup: Dict[str, int] = {}
+    try:
+        teams = data_loading.load_teams()
+        for row in teams.itertuples(index=False):
+            if pd.notna(row.TeamName):
+                lookup[_normalize_name(row.TeamName)] = int(row.TeamID)
+    except FileNotFoundError:
+        pass
+    try:
+        spellings = data_loading.load_team_spellings()
+        for row in spellings.itertuples(index=False):
+            if pd.notna(row.TeamNameSpelling):
+                lookup[_normalize_name(row.TeamNameSpelling)] = int(row.TeamID)
+    except FileNotFoundError:
+        pass
+    return lookup
 
 
 def _safe_int(value: object) -> Optional[int]:

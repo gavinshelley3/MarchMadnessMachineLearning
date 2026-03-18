@@ -48,6 +48,12 @@ MILESTONES = [
 ]
 CALIBRATOR_DIR = Path("outputs/models/advancement/calibrators/")
 
+
+def _label_name_for_milestone(milestone: str) -> str:
+    """Return the dataset label name for a milestone slug."""
+
+    return "won_championship" if milestone == "champion" else f"reached_{milestone}"
+
 @dataclass(frozen=True)
 class FieldEntry:
     season: int
@@ -327,7 +333,7 @@ def run_inference(args: argparse.Namespace) -> Dict[str, object]:
     if calibrators:
         for i in range(len(output_df)):
             raw_probs = {
-                milestone: output_df.loc[i, ROUND_COLUMN_MAP[f"reached_{milestone}"]]
+                milestone: output_df.loc[i, ROUND_COLUMN_MAP[_label_name_for_milestone(milestone)]]
                 for milestone in MILESTONES
             }
             float_probs = {k: float(v.item() if hasattr(v, "item") else v) for k, v in raw_probs.items()}

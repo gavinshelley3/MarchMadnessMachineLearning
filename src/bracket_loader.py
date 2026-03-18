@@ -27,6 +27,14 @@ class TeamSlot:
             if not team_key:
                 raise ValueError("Each team entry must define 'team_key' or provide options with one.")
         display_name = payload.get("display_name", team_key)
+        placeholder = str(team_key).lower()
+        if options and (placeholder.endswith("playin") or placeholder in {"tbd"}):
+            primary = options[0]
+            primary_key = primary.get("team_key")
+            primary_name = primary.get("display_name", primary_key)
+            if primary_key:
+                team_key = primary_key
+                display_name = primary_name or primary_key
         seed_raw = payload.get("seed")
         if seed_raw is None:
             raise ValueError(f"Team entry for {display_name} is missing a seed value.")

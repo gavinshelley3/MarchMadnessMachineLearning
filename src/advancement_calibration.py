@@ -5,28 +5,32 @@ Fits and applies post-training calibration (Isotonic Regression, Platt Scaling)
 to advancement neural network outputs for each tournament milestone.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
-import os
 from pathlib import Path
 import pickle
 from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+from sklearn.calibration import calibration_curve
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss
-from sklearn.calibration import calibration_curve
 
-MILESTONES = [
-    "round_of_32",
-    "sweet_16",
-    "elite_8",
-    "final_four",
-    "championship_game",
-    "champion",
-]
+from .advancement_dataset import ADVANCEMENT_LABELS
+
+LABEL_NAMES = [label for label, _ in ADVANCEMENT_LABELS]
+MILESTONES = {
+    "reached_round_of_32": "round_of_32",
+    "reached_sweet_16": "sweet_16",
+    "reached_elite_8": "elite_8",
+    "reached_final_four": "final_four",
+    "reached_championship_game": "championship_game",
+    "won_championship": "champion",
+}
 
 CALIBRATOR_DIR = Path("outputs/models/advancement/calibrators/")
 REPORT_PATH = Path("outputs/reports/advancement_calibration_report.json")
@@ -37,22 +41,24 @@ def fit_isotonic(y_true, y_pred):
     calibrator.fit(y_pred, y_true)
     return calibrator
 
+
 def fit_platt(y_true, y_pred):
     lr = LogisticRegression(solver="lbfgs")
     lr.fit(y_pred.reshape(-1, 1), y_true)
     return lr
 
+
 def apply_calibrator(calibrator, y_pred, method):
     if method == "isotonic":
         return calibrator.transform(y_pred)
-    elif method == "platt":
+    if method == "platt":
         return calibrator.predict_proba(y_pred.reshape(-1, 1))[:, 1]
-    else:
-        raise ValueError(f"Unknown calibration method: {method}")
+    raise ValueError(f"Unknown calibration method: {method}")
+
 
 def load_predictions(pred_path: Path):
-    df = pd.read_csv(pred_path)
-    return df
+    return pd.read_csv(pred_path)
+
 
 def save_calibrator(calibrator, milestone, method):
     CALIBRATOR_DIR.mkdir(parents=True, exist_ok=True)
@@ -60,6 +66,7 @@ def save_calibrator(calibrator, milestone, method):
     with open(out_path, "wb") as f:
         pickle.dump(calibrator, f)
     return str(out_path)
+
 
 def evaluate_calibration(y_true, y_pred, y_calib):
     return {
@@ -69,12 +76,11 @@ def evaluate_calibration(y_true, y_pred, y_calib):
         "logloss_after": float(log_loss(y_true, y_calib, labels=[0, 1])),
     }
 
+
 def calibration_curve_summary(y_true, y_pred):
     prob_true, prob_pred = calibration_curve(y_true, y_pred, n_bins=10)
-    return {
-        "prob_true": prob_true.tolist(),
-        "prob_pred": prob_pred.tolist(),
-    }
+    return {"prob_true": prob_true.tolist(), "prob_pred": prob_pred.tolist()}
+
 
 def main():
     parser = argparse.ArgumentParser(description="Calibrate advancement NN probabilities.")
@@ -84,28 +90,32 @@ def main():
     args = parser.parse_args()
 
     df = load_predictions(args.predictions)
-    report = {"milestones": {}, "method": args.method}
+    report: Dict[str, object] = {"milestones": {}, "method": args.method}
 
-    for milestone in MILESTONES:
-        y_true = df[f"label_{milestone}"].values
-        y_pred = df[f"prob_{milestone}"].values
-        if args.method == "isotonic":
-            calibrator = fit_isotonic(y_true, y_pred)
-        else:
-            calibrator = fit_platt(y_true, y_pred)
+    for label in LABEL_NAMES:
+        stage = MILESTONES[label]
+        true_col = f"true_{label}"
+        pred_col = f"pred_{label}"
+        if true_col not in df.columns or pred_col not in df.columns:
+            raise KeyError(f"Missing columns {true_col} / {pred_col} in {args.predictions}")
+        y_true = df[true_col].to_numpy(dtype=float)
+        y_pred = df[pred_col].to_numpy(dtype=float)
+        calibrator = fit_isotonic(y_true, y_pred) if args.method == "isotonic" else fit_platt(y_true, y_pred)
         y_calib = apply_calibrator(calibrator, y_pred, args.method)
-        save_path = save_calibrator(calibrator, milestone, args.method)
+        save_path = save_calibrator(calibrator, stage, args.method)
         metrics = evaluate_calibration(y_true, y_pred, y_calib)
         curve = calibration_curve_summary(y_true, y_pred)
-        report["milestones"][milestone] = {
+        report["milestones"][stage] = {
             "calibrator_path": save_path,
             **metrics,
             "calibration_curve": curve,
         }
+
     args.report.parent.mkdir(parents=True, exist_ok=True)
-    with open(args.report, "w") as f:
+    with open(args.report, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
     print(f"Calibration complete. Report saved to {args.report}")
+
 
 if __name__ == "__main__":
     main()

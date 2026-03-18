@@ -13,6 +13,7 @@ CORE_FILES = {
     "tourney_compact": "MNCAATourneyCompactResults.csv",
     "tourney_seeds": "MNCAATourneySeeds.csv",
     "massey_ordinals": "MMasseyOrdinals.csv",
+    "team_spellings": "MTeamSpellings.csv",
 }
 
 
@@ -64,6 +65,10 @@ def load_tourney_seeds(data_dir: Optional[Path] = None) -> pd.DataFrame:
 
 def load_massey_ordinals(data_dir: Optional[Path] = None) -> pd.DataFrame:
     return _load_csv(CORE_FILES["massey_ordinals"], data_dir)
+
+
+def load_team_spellings(data_dir: Optional[Path] = None) -> pd.DataFrame:
+    return _load_csv(CORE_FILES["team_spellings"], data_dir)
 
 
 def load_all_core_data(data_dir: Optional[Path] = None) -> Dict[str, pd.DataFrame]:

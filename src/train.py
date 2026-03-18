@@ -152,6 +152,22 @@ def run_logistic_regression_baseline(
     return model.predict_proba(X_val)[:, 1]
 
 
+def fit_logistic_regression_model(
+    X: np.ndarray,
+    y: np.ndarray,
+    *,
+    max_iter: int = 1000,
+    solver: str = "lbfgs",
+) -> LogisticRegression:
+    """Fit a logistic regression classifier for production inference artifacts."""
+
+    if len(np.unique(y)) < 2:
+        raise ValueError("Training labels must contain at least two classes for logistic regression.")
+    model = LogisticRegression(max_iter=max_iter, solver=solver)
+    model.fit(X, y)
+    return model
+
+
 def train_model(
     model: nn.Module,
     train_loader: DataLoader,
