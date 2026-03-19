@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import difflib
+import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
 
 from . import data_loading, dataset_builder
+from .bracket_loader import BracketDefinition, load_bracket_definition
 from .config import get_config
 from .feature_metadata import select_diff_columns
 from .production_artifacts import (
@@ -23,6 +26,9 @@ from .production_config import (
     get_predictions_dir,
 )
 from .utils import ensure_parent_dir
+
+DEFAULT_BRACKET_PATH = Path("data/brackets/projected_2026_bracket.json")
+FIELD_ALIASES = {"miami": "miamifl", "queens": "queensnc"}
 
 
 def parse_sample_submission(sample_df: pd.DataFrame, season: int) -> pd.DataFrame:
@@ -98,14 +104,43 @@ def build_inference_dataset(
     matchups: pd.DataFrame,
 ) -> pd.DataFrame:
     numeric_features = [
-        col
-        for col in context.columns
-        if col not in {"Season", "TeamID", "Seed"}
+        col for col in context.columns if col not in {"Season", "TeamID", "Seed"}
     ]
-    dataset = dataset_builder.build_pairwise_inference_dataset(
-        context=context,
-        matchups=matchups,
-        diff_feature_names=numeric_features,
+
+    def _rename_context(prefix: str) -> pd.DataFrame:
+        rename_map = {
+            col: f"{prefix}_{col}" for col in context.columns if col != "Season"
+        }
+        return context.rename(columns=rename_map)
+
+    dataset = matchups.copy()
+    team1_frame = _rename_context("Team1")
+    dataset = dataset.merge(
+        team1_frame,
+        left_on=["Season", "Team1ID"],
+        right_on=["Season", "Team1_TeamID"],
+        how="left",
+    ).drop(columns=["Team1_TeamID"])
+
+    team2_frame = _rename_context("Team2")
+    dataset = dataset.merge(
+        team2_frame,
+        left_on=["Season", "Team2ID"],
+        right_on=["Season", "Team2_TeamID"],
+        how="left",
+    ).drop(columns=["Team2_TeamID"])
+
+    for feature in numeric_features:
+        dataset[f"Diff_{feature}"] = (
+            dataset[f"Team1_{feature}"] - dataset[f"Team2_{feature}"]
+        )
+
+    dataset["MatchupID"] = (
+        dataset["Season"].astype(str)
+        + "_"
+        + dataset["Team1ID"].astype(str)
+        + "_"
+        + dataset["Team2ID"].astype(str)
     )
     return dataset
 
@@ -115,6 +150,64 @@ def load_matchups(sample_path: Path, season: int) -> pd.DataFrame:
     if "ID" not in sample_df.columns:
         raise ValueError("Sample submission file must contain an 'ID' column.")
     return parse_sample_submission(sample_df, season)
+
+
+def _normalize_team_name(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    normalized = re.sub(r"[^a-z0-9]", "", value.lower())
+    return FIELD_ALIASES.get(normalized, normalized)
+
+
+def _iter_bracket_entries(bracket: BracketDefinition) -> Iterable[str]:
+    for matchup in bracket.iter_round_of_64():
+        for slot in (matchup.team1, matchup.team2):
+            yield slot.team_key
+            yield slot.display_name
+            for option in slot.options:
+                yield option.get("team_key") or ""
+                yield option.get("display_name") or ""
+
+
+def _resolve_field_team_ids(bracket_file: Path, data_dir: Optional[Path]) -> Set[int]:
+    bracket = load_bracket_definition(bracket_file)
+    teams = data_loading.load_teams(data_dir)
+    lookup: Dict[str, int] = {
+        _normalize_team_name(row.TeamName): int(row.TeamID)
+        for row in teams.itertuples(index=False)
+    }
+    spellings = data_loading.load_team_spellings(data_dir)
+    for row in spellings.itertuples(index=False):
+        lookup[_normalize_team_name(row.TeamNameSpelling)] = int(row.TeamID)
+
+    keys = list(lookup.keys())
+    resolved: Set[int] = set()
+    missing: List[str] = []
+    for entry in _iter_bracket_entries(bracket):
+        normalized = _normalize_team_name(entry)
+        if not normalized:
+            continue
+        if normalized in lookup:
+            resolved.add(lookup[normalized])
+            continue
+        close = difflib.get_close_matches(normalized, keys, n=1, cutoff=0.90)
+        if close:
+            resolved.add(lookup[close[0]])
+        else:
+            missing.append(entry)
+    if not resolved:
+        raise ValueError(f"Unable to resolve any teams from bracket file {bracket_file}.")
+    if missing:
+        unique = sorted({name for name in missing if name})
+        raise ValueError(
+            f"Unable to resolve TeamIDs for the following bracket entries: {unique}"
+        )
+    return resolved
+
+
+def _restrict_matchups_to_field(matchups: pd.DataFrame, team_ids: Set[int]) -> pd.DataFrame:
+    mask = matchups["Team1ID"].isin(team_ids) & matchups["Team2ID"].isin(team_ids)
+    return matchups.loc[mask].reset_index(drop=True)
 
 
 def _attach_team_names(df: pd.DataFrame, teams: pd.DataFrame) -> pd.DataFrame:
@@ -142,6 +235,16 @@ def run_inference(args: argparse.Namespace) -> Tuple[pd.DataFrame, Dict[str, Any
     model, scaler, feature_cols, artifact_metadata = load_production_artifacts(config)
 
     matchups = load_matchups(args.sample_submission, season)
+    field_team_ids: Optional[Set[int]] = None
+    if args.field_only:
+        bracket_path = args.bracket_file or DEFAULT_BRACKET_PATH
+        field_team_ids = _resolve_field_team_ids(bracket_path, args.data_dir)
+        matchups = _restrict_matchups_to_field(matchups, field_team_ids)
+        if matchups.empty:
+            raise ValueError(
+                f"Bracket filtering removed all matchups; check {bracket_path} and prediction inputs."
+            )
+
     context = build_context_for_season(args.data_dir, season)
     context_subset, coverage_stats = _subset_context_to_matchups(context, matchups)
     dataset = build_inference_dataset(context_subset, matchups)
@@ -188,16 +291,28 @@ def run_inference(args: argparse.Namespace) -> Tuple[pd.DataFrame, Dict[str, Any
         "feature_fill_values": fill_values,
         "artifact_metadata": artifact_metadata,
         "sample_submission": str(args.sample_submission),
+        "field_only": bool(args.field_only),
+        "bracket_file": str(args.bracket_file) if args.field_only else None,
+        "field_team_count": len(field_team_ids) if field_team_ids else None,
     }
     return predictions, diagnostics
 
 
-def write_outputs(predictions: pd.DataFrame, diagnostics: Dict[str, Any], config) -> None:
+def write_outputs(
+    predictions: pd.DataFrame,
+    diagnostics: Dict[str, Any],
+    config,
+    output_path: Optional[Path] = None,
+) -> None:
     predictions_dir = get_predictions_dir(config)
     ensure_parent_dir(predictions_dir / "placeholder.txt")
 
-    csv_path = predictions_dir / f"{diagnostics['season']}_matchup_predictions.csv"
-    metadata_path = predictions_dir / f"{diagnostics['season']}_prediction_metadata.json"
+    if output_path:
+        csv_path = output_path
+        metadata_path = csv_path.with_name(f"{csv_path.stem}_metadata.json")
+    else:
+        csv_path = predictions_dir / f"{diagnostics['season']}_matchup_predictions.csv"
+        metadata_path = predictions_dir / f"{diagnostics['season']}_prediction_metadata.json"
 
     ordered_cols = [
         "MatchupID",
@@ -253,6 +368,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Retrain the production model artifacts even if they exist.",
     )
+    parser.add_argument(
+        "--field-only",
+        action="store_true",
+        help="Restrict predictions to only the teams inside --bracket-file.",
+    )
+    parser.add_argument(
+        "--bracket-file",
+        type=Path,
+        default=DEFAULT_BRACKET_PATH,
+        help="Bracket JSON used when --field-only is enabled.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional explicit output CSV path (otherwise season-based default is used).",
+    )
     return parser.parse_args()
 
 
@@ -260,7 +392,7 @@ def main() -> None:
     args = parse_args()
     predictions, diagnostics = run_inference(args)
     config = get_config()
-    write_outputs(predictions, diagnostics, config)
+    write_outputs(predictions, diagnostics, config, args.output)
     print(
         f"Generated {diagnostics['matchup_rows']} matchup predictions for season {diagnostics['season']}."
     )
