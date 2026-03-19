@@ -17,7 +17,7 @@ import pickle
 from .advancement_dataset import ADVANCEMENT_LABELS, build_team_context_with_features
 from .bracket_generation import PredictionLookup
 from .bracket_loader import BracketDefinition, TeamSlot, load_bracket_definition
-from .config import get_config
+from .config import Config, get_config
 from .data_loading import (
     load_massey_ordinals,
     load_regular_season_detailed_results,
@@ -48,6 +48,25 @@ MILESTONES = [
 ]
 CALIBRATOR_DIR = Path("outputs/models/advancement/calibrators/")
 CALIBRATION_METADATA = CALIBRATOR_DIR / "calibration_metadata.json"
+
+
+def _preferred_advancement_dirs(config: Config) -> List[Path]:
+    """Return advancement model directories ordered by preference."""
+
+    seedaware = config.paths.models_dir / "advancement_seedaware" / "sgd"
+    legacy = config.paths.models_dir / "advancement" / "sgd"
+    return [seedaware, legacy]
+
+
+def _resolve_artifact(config: Config, filename: str) -> Path:
+    """Pick the first existing advancement artifact, defaulting to seed-aware."""
+
+    for directory in _preferred_advancement_dirs(config):
+        candidate = directory / filename
+        if candidate.exists():
+            return candidate
+    # Fall back to the seed-aware location even if it does not exist yet so errors stay informative.
+    return _preferred_advancement_dirs(config)[0] / filename
 
 
 def _label_name_for_milestone(milestone: str) -> str:
@@ -281,9 +300,9 @@ def run_inference(args: argparse.Namespace) -> Dict[str, object]:
         data_dir=args.data_dir,
     )
 
-    model_path = args.model_path or (config.paths.models_dir / "advancement" / "sgd" / "model.pt")
-    scaler_path = args.scaler_path or (config.paths.models_dir / "advancement" / "sgd" / "scaler.pkl")
-    feature_cols_path = args.feature_columns or (config.paths.models_dir / "advancement" / "sgd" / "feature_columns.json")
+    model_path = args.model_path or _resolve_artifact(config, "model.pt")
+    scaler_path = args.scaler_path or _resolve_artifact(config, "scaler.pkl")
+    feature_cols_path = args.feature_columns or _resolve_artifact(config, "feature_columns.json")
     if not model_path.exists() or not scaler_path.exists():
         raise FileNotFoundError("Advancement model artifacts were not found. Train the model before running inference.")
     feature_cols = _load_feature_columns(feature_cols_path)
