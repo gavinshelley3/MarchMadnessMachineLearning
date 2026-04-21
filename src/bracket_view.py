@@ -19,7 +19,7 @@ ROUND_LABELS = {
     "Championship": "Championship",
 }
 NATIONAL_ROUNDS = ["FinalFour", "Championship"]
-DEFAULT_REGION_ORDER = ["East", "West", "South", "Midwest"]
+DEFAULT_REGION_ORDER = ["East", "West", "Midwest", "South"]
 
 
 class BracketViewRenderer:
@@ -77,7 +77,7 @@ class BracketViewRenderer:
         regions_markup = self._render_regions(data)
         national_markup = self._render_final_four(data)
 
-        return f"""<!doctype html>
+        html_doc = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -149,23 +149,69 @@ class BracketViewRenderer:
     .chip.loser {{ background: #c9d3e4; }}
     .chip.prob {{ background: #ffd166; }}
     .regions {{
+      margin-top: 1rem;
+    }}
+    .bracket-canvas {{
+      display: grid;
+      grid-template-columns: minmax(320px, 1fr) clamp(70px, 8vw, 120px) minmax(320px, 1fr);
+      gap: clamp(1rem, 2.5vw, 2.5rem);
+      align-items: stretch;
+    }}
+    .side {{
       display: flex;
       flex-direction: column;
-      gap: 2rem;
+      gap: clamp(1rem, 1.8vw, 1.6rem);
     }}
-    .region-row {{
+    .bracket-spine {{
+      position: relative;
       display: flex;
-      flex-wrap: wrap;
-      gap: 1.5rem;
+      flex-direction: column;
       justify-content: center;
+      align-items: center;
+      gap: 1.25rem;
+      isolation: isolate;
+    }}
+    .spine-line {{
+      display: block;
+      width: 2px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, rgba(11, 34, 68, 0.2), rgba(11, 99, 206, 0.45));
+      flex: 1;
+      min-height: 80px;
+    }}
+    .spine-badge {{
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      font-size: 0.7rem;
+      padding: 0.4rem 0.2rem;
+      border-radius: 999px;
+      background: #0b63ce;
+      color: #fff;
+      font-weight: 600;
     }}
     .bracket-region {{
-      flex: 1 1 480px;
       background: var(--card);
-      border-radius: 16px;
-      padding: 1.25rem;
-      box-shadow: 0 10px 30px rgba(15, 31, 62, 0.08);
+      border-radius: 18px;
+      padding: 1rem 1.15rem 1.2rem;
+      box-shadow: 0 12px 32px rgba(15, 31, 62, 0.08);
       border: 1px solid var(--border);
+      position: relative;
+      overflow: hidden;
+    }}
+    .bracket-region::after {{
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -2.5rem;
+      width: 2.5rem;
+      border-top: 1px solid rgba(15, 31, 62, 0.18);
+      opacity: 0.8;
+    }}
+    .side-right .bracket-region::after {{
+      right: auto;
+      left: -2.5rem;
     }}
     .region-header {{
       font-size: 1.15rem;
@@ -177,24 +223,43 @@ class BracketViewRenderer:
     }}
     .rounds-grid {{
       display: grid;
-      grid-template-columns: repeat(4, minmax(140px, 1fr));
-      gap: 0.75rem;
+      grid-template-columns: repeat(4, minmax(110px, 1fr));
+      gap: clamp(0.4rem, 1vw, 0.85rem);
+    }}
+    .bracket-region.mirror .rounds-grid {{
+      direction: rtl;
+    }}
+    .bracket-region.mirror .round-column {{
+      direction: ltr;
+      text-align: right;
+    }}
+    .bracket-region.mirror .round-column .team-line {{
+      justify-content: flex-end;
+    }}
+    .bracket-region.mirror .game-card::after {{
+      right: auto;
+      left: -0.45rem;
     }}
     .round-column {{
       position: relative;
-      padding-right: 0.25rem;
+      padding-right: 0.4rem;
     }}
     .round-column::after {{
       content: "";
       position: absolute;
-      top: 0;
-      bottom: 0;
-      right: -0.35rem;
-      border-right: 1px solid var(--border);
-      opacity: 0.5;
+      top: 1.1rem;
+      bottom: 1.1rem;
+      right: -0.45rem;
+      border-right: 1px solid rgba(9, 31, 67, 0.15);
     }}
     .round-column:last-child::after {{
       display: none;
+    }}
+    .bracket-region.mirror .round-column::after {{
+      right: auto;
+      left: -0.45rem;
+      border-right: none;
+      border-left: 1px solid rgba(9, 31, 67, 0.15);
     }}
     .round-column h3 {{
       margin: 0 0 0.4rem;
@@ -225,7 +290,7 @@ class BracketViewRenderer:
     }}
     .team-line {{
       display: grid;
-      grid-template-columns: auto 1fr auto;
+      grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
       gap: 0.5rem;
       font-size: 0.92rem;
@@ -246,9 +311,8 @@ class BracketViewRenderer:
     }}
     .team-line .team-name {{
       font-weight: 500;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      line-height: 1.2;
+      white-space: normal;
     }}
     .team-line .prob {{
       font-size: 0.8rem;
@@ -276,7 +340,8 @@ class BracketViewRenderer:
       margin-top: 0.35rem;
     }}
     .national {{
-      margin-top: 2.5rem;
+      margin: clamp(1.8rem, 4vw, 2.8rem) auto 0;
+      max-width: min(960px, 92vw);
       padding: 1.5rem;
       background: var(--card);
       border-radius: 20px;
@@ -292,8 +357,8 @@ class BracketViewRenderer:
     }}
     .national-grid {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 1.5rem;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.4rem;
       align-items: stretch;
     }}
     .champion-card {{
@@ -339,6 +404,18 @@ class BracketViewRenderer:
       letter-spacing: 0.1em;
     }}
     @media (max-width: 900px) {{
+      .bracket-canvas {{
+        grid-template-columns: 1fr;
+      }}
+      .bracket-spine {{
+        display: none;
+      }}
+      .side {{
+        gap: 0.9rem;
+      }}
+      .bracket-region::after {{
+        display: none;
+      }}
       .rounds-grid {{
         grid-template-columns: repeat(2, minmax(140px, 1fr));
       }}
@@ -359,6 +436,7 @@ class BracketViewRenderer:
 </body>
 </html>
 """
+        return html_doc
 
     def _build_header(self, metadata: dict, champion: Optional[dict]) -> str:
         model = metadata.get("model_name", "unknown")
@@ -369,7 +447,7 @@ class BracketViewRenderer:
         return f"""
   <header class="page-header">
     <div>
-      <p class="eyebrow">{html.escape(bracket_type)} Bracket · {html.escape(str(season))}</p>
+      <p class="eyebrow">{html.escape(bracket_type)} Bracket Â· {html.escape(str(season))}</p>
       <h1 class="page-title">March Madness Bracket View</h1>
     </div>
     <div class="meta-list">
@@ -390,15 +468,29 @@ class BracketViewRenderer:
   """
 
     def _render_regions(self, data: dict) -> str:
-        blocks: List[str] = []
-        regions = self._region_list(data)
-        for chunk in self._chunk_regions(regions, 2):
-            row_blocks = [self._render_region(data, region) for region in chunk if region]
-            if row_blocks:
-                blocks.append(f'<div class="region-row">{"".join(row_blocks)}</div>')
-        return "\n".join(blocks)
+        regions = [region for region in self._region_list(data) if region]
+        if not regions:
+            return ""
+        left_regions = regions[::2]
+        right_regions = regions[1::2]
+        left_markup = "".join(self._render_region(data, region, mirror=False) for region in left_regions)
+        right_markup = "".join(self._render_region(data, region, mirror=True) for region in right_regions)
+        spine = (
+            '<div class="bracket-spine">'
+            '<span class="spine-line top"></span>'
+            '<div class="spine-badge">Final Four</div>'
+            '<span class="spine-line bottom"></span>'
+            "</div>"
+        )
+        return (
+            '<div class="bracket-canvas">'
+            f'<div class="side side-left">{left_markup}</div>'
+            f"{spine}"
+            f'<div class="side side-right">{right_markup}</div>'
+            "</div>"
+        )
 
-    def _render_region(self, data: dict, region: str) -> str:
+    def _render_region(self, data: dict, region: str, mirror: bool = False) -> str:
         columns: List[str] = []
         for round_name in ROUND_ORDER:
             games = self._collect_games(data, round_name, region)
@@ -406,7 +498,13 @@ class BracketViewRenderer:
             columns.append(
                 f'<div class="round-column"><h3>{html.escape(ROUND_LABELS.get(round_name, round_name))}</h3>{games_html}</div>'
             )
-        return f'<section class="bracket-region" data-region="{html.escape(region)}"><div class="region-header">{html.escape(region)} Region</div><div class="rounds-grid">{"".join(columns)}</div></section>'
+        classes = "bracket-region mirror" if mirror else "bracket-region"
+        return (
+            f'<section class="{classes}" data-region="{html.escape(region)}">'
+            f'<div class="region-header">{html.escape(region)} Region</div>'
+            f'<div class="rounds-grid">{"".join(columns)}</div>'
+            f"</section>"
+        )
 
     def _collect_games(self, data: dict, round_name: str, region: Optional[str] = None) -> List[dict]:
         games = data.get("rounds", {}).get(round_name, [])
@@ -422,13 +520,13 @@ class BracketViewRenderer:
         return (
             f'<div class="game-card">'
             f"{team1}{team2}"
-            f'<div class="game-meta">{html.escape(slot)} · {self._format_percent(winner_prob)} win</div>'
+            f'<div class="game-meta">{html.escape(slot)} Â· {self._format_percent(winner_prob)} win</div>'
             f"</div>"
         )
 
     def _team_line(self, team: dict, prob: Optional[float], winner_key: Optional[str]) -> str:
         name = html.escape(str(team.get("display_name", "TBD")))
-        seed = html.escape(str(team.get("seed", "—")))
+        seed = html.escape(str(team.get("seed", "â€”")))
         prob_text = self._format_percent(prob)
         is_winner = winner_key is not None and team.get("team_key") == winner_key
         classes = "team-line winner" if is_winner else "team-line loser"
@@ -439,7 +537,7 @@ class BracketViewRenderer:
         return max(probs) if probs else 0.0
 
     def _format_percent(self, value: Optional[float]) -> str:
-        return f"{float(value)*100:.1f}%" if isinstance(value, (int, float)) else "—"
+        return f"{float(value)*100:.1f}%" if isinstance(value, (int, float)) else "â€”"
 
     def _render_final_four(self, data: dict) -> str:
         semifinals = self._collect_games(data, "FinalFour")
@@ -470,7 +568,7 @@ class BracketViewRenderer:
       <div class="champion-card">
         <span class="champion-badge">Champion</span>
         <p class="champion-name">{champ_name}</p>
-        <p class="champion-meta">{seed_text} · {region_text}</p>
+        <p class="champion-meta">{seed_text} Â· {region_text}</p>
         <p class="champion-meta">Title probability: {self._format_percent(win_prob)}</p>
       </div>
     """
